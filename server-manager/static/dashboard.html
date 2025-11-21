@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Immich Server Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #2563eb;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #1f2937;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .stat:last-child {
+            border-bottom: none;
+        }
+
+        .stat-label {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .status-ok {
+            color: #10b981;
+        }
+
+        .status-warning {
+            color: #f59e0b;
+        }
+
+        .status-error {
+            color: #ef4444;
+        }
+
+        .button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .button:hover {
+            background: #1d4ed8;
+        }
+
+        .button-secondary {
+            background: #6b7280;
+        }
+
+        .button-secondary:hover {
+            background: #4b5563;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .alert-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Immich Server Manager</h1>
+            <p class="subtitle">Monitoring, Backups, and Health Checks</p>
+        </header>
+
+        <div id="content">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading dashboard...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+
+        async function fetchData() {
+            try {
+                const [status, disks, backups, alerts] = await Promise.all([
+                    fetch('/api/status').then(r => r.json()),
+                    fetch('/api/disks').then(r => r.json()),
+                    fetch('/api/backups').then(r => r.json()),
+                    fetch('/api/alerts').then(r => r.json())
+                ]);
+
+                renderDashboard(status, disks, backups, alerts);
+            } catch (error) {
+                document.getElementById('content').innerHTML = `
+                    <div class="alert alert-error">
+                        Failed to load data: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        function renderDashboard(status, disks, backups, alerts) {
+            const system = status.system;
+            const immichHealthy = status.immich_healthy;
+
+            document.getElementById('content').innerHTML = `
+                <div class="grid">
+                    <div class="card">
+                        <h2>🖥️ System Status</h2>
+                        <div class="stat">
+                            <span class="stat-label">CPU Usage</span>
+                            <span class="stat-value ${system.cpu_percent > 80 ? 'status-warning' : 'status-ok'}">
+                                ${system.cpu_percent.toFixed(1)}%
+                            </span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Memory Usage</span>
+                            <span class="stat-value ${system.memory_percent > 80 ? 'status-warning' : 'status-ok'}">
+                                ${system.memory_percent.toFixed(1)}% (${system.memory_used_gb.toFixed(1)} GB)
+                            </span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Disk Usage</span>
+                            <span class="stat-value ${system.disk_usage_percent > 85 ? 'status-warning' : 'status-ok'}">
+                                ${system.disk_usage_percent.toFixed(1)}% (${system.disk_used_gb.toFixed(1)} GB)
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>📷 Immich Status</h2>
+                        <div class="stat">
+                            <span class="stat-label">Service Health</span>
+                            <span class="stat-value ${immichHealthy ? 'status-ok' : 'status-error'}">
+                                ${immichHealthy ? '✓ Healthy' : '✗ Issues Detected'}
+                            </span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Containers</span>
+                            <span class="stat-value">${status.containers.length} running</span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>💾 Disk Health</h2>
+                        ${disks.disks.map(disk => `
+                            <div class="stat">
+                                <span class="stat-label">${disk.device}</span>
+                                <span class="stat-value ${disk.smart_status ? 'status-ok' : 'status-error'}">
+                                    ${disk.temperature ? disk.temperature + '°C' : 'N/A'}
+                                </span>
+                            </div>
+                        `).join('') || '<p>No disk data available</p>'}
+                    </div>
+
+                    <div class="card">
+                        <h2>💿 Backups</h2>
+                        ${backups.history.slice(0, 3).map(backup => `
+                            <div class="stat">
+                                <span class="stat-label">${new Date(backup.timestamp).toLocaleDateString()}</span>
+                                <span class="stat-value ${backup.status === 'success' ? 'status-ok' : 'status-error'}">
+                                    ${backup.status}
+                                </span>
+                            </div>
+                        `).join('') || '<p>No backups yet</p>'}
+                        <button class="button" onclick="triggerBackup()">Backup Now</button>
+                    </div>
+                </div>
+
+                ${alerts.alerts.length > 0 ? `
+                    <div class="card">
+                        <h2>🔔 Recent Alerts</h2>
+                        ${alerts.alerts.slice(0, 5).map(alert => `
+                            <div class="alert alert-${alert.severity === 'critical' ? 'error' : alert.severity}">
+                                <strong>${alert.category}:</strong> ${alert.message}
+                                <small style="display:block;margin-top:5px;opacity:0.7;">
+                                    ${new Date(alert.timestamp).toLocaleString()}
+                                </small>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        async function triggerBackup() {
+            if (!confirm('Start a backup now?')) return;
+
+            try {
+                const response = await fetch('/api/backup/now', { method: 'POST' });
+                const data = await response.json();
+                alert('Backup started! Check the backups section for progress.');
+            } catch (error) {
+                alert('Failed to start backup: ' + error.message);
+            }
+        }
+
+        // Initial load
+        fetchData();
+
+        // Auto-refresh every 30 seconds
+        refreshInterval = setInterval(fetchData, 30000);
+    </script>
+</body>
+</html>

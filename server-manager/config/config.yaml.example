@@ -1,0 +1,59 @@
+# Immich Server Manager Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  workers: 2
+  log_level: "INFO"
+
+immich:
+  docker_compose_path: "/opt/immich"
+  api_url: "http://localhost:2283/api"
+  api_key: ""  # Generate in Immich: Admin → API Keys
+
+storage:
+  mergerfs_mount: "/mnt/storage"
+  data_drives:
+    - "/dev/sda"
+    - "/dev/sdb"
+  parity_drives:
+    - "/dev/sdc"
+  snapraid_config: "/etc/snapraid.conf"
+
+backup:
+  enabled: true
+  local_path: "/mnt/backups/immich"
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 30
+  compression: true
+  encryption:
+    enabled: false
+    public_key: ""
+
+monitoring:
+  disk_check_interval: 300  # 5 minutes
+  metrics_interval: 60      # 1 minute
+
+thresholds:
+  disk_temp_warning: 45
+  disk_temp_critical: 50
+  disk_space_warning: 85
+  disk_space_critical: 95
+
+alerts:
+  email:
+    enabled: true
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    smtp_user: "your-email@gmail.com"
+    smtp_password: "your-app-password"
+    from: "immich-server@yourdomain.com"
+    to:
+      - "admin@yourdomain.com"
+  webhook:
+    enabled: false
+    url: ""
+  quiet_hours:
+    enabled: true
+    start: "22:00"
+    end: "08:00"

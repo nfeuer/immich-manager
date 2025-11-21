@@ -1,0 +1,24 @@
+[Unit]
+Description=Photo Curator Assistant
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/photo-curator
+Environment="PATH=/opt/photo-curator/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/opt/photo-curator/venv/bin/python -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --workers 2
+Restart=always
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=photo-curator
+
+[Install]
+WantedBy=multi-user.target

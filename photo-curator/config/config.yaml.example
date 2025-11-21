@@ -1,0 +1,37 @@
+# Photo Curator Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8081
+  workers: 2
+
+immich:
+  api_url: "http://localhost:2283/api"
+  api_key: ""  # Same as Server Manager
+
+ai:
+  use_local_models: true
+  model_path: "models/"
+  batch_size: 10
+  quality_threshold: 0.6
+
+scoring:
+  weights:
+    technical_quality: 0.3
+    faces: 0.3
+    uniqueness: 0.2
+    aesthetic: 0.2
+
+curation:
+  monthly_target: 50  # Target photos per month
+  reminder_day: 1     # 1st of month
+  reminder_time: "09:00"
+
+notifications:
+  email:
+    enabled: true
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    smtp_user: "your-email@gmail.com"
+    smtp_password: "your-app-password"
+    from: "photo-curator@yourdomain.com"
