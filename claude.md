@@ -4,6 +4,129 @@ This document tracks feature ideas and improvements for future implementation.
 
 ## Features Saved for Later Implementation
 
+### 6. Event Auto-Detector with Manual Sharing Flow
+
+**Purpose**: Detect events from photo metadata and suggest (never auto-create) shared albums
+
+**Features**:
+- Detect events from clustering of photos by:
+  * Time proximity (multiple photos within short time span)
+  * Location proximity (GPS data clustering)
+  * Face detection (same people appear in multiple photos)
+  * Upload patterns (multiple users upload photos on same dates)
+- Suggest event names based on:
+  * Location data ("Trip to San Francisco")
+  * Date patterns ("Birthday Party - March 2024")
+  * Photo volume ("Weekend Getaway")
+- Show suggestions in curator dashboard
+- Manual confirmation required for ALL actions
+- Sharing workflow:
+  1. System detects potential event
+  2. Shows suggestion card: "Looks like you had an event on March 15!"
+  3. User clicks "Review"
+  4. System shows photos + detected participants (by face recognition)
+  5. User can:
+     - Create personal album (no sharing)
+     - Create shared album and manually invite specific users
+     - Dismiss suggestion
+- Never automatically share photos across users
+
+**Implementation Notes**:
+```python
+# Event detection algorithm
+def detect_events(user_id: str, year: int, month: int) -> List[EventSuggestion]:
+    photos = get_photos_with_metadata(user_id, year, month)
+
+    # Cluster by time (photos within 4 hours = same event)
+    time_clusters = cluster_by_timestamp(photos, max_gap_hours=4)
+
+    # Further cluster by location if GPS available
+    for cluster in time_clusters:
+        if has_gps_data(cluster):
+            location_clusters = cluster_by_location(cluster, max_distance_km=1)
+
+    # Detect participants via face detection
+    for event in events:
+        event.participants = detect_faces_across_photos(event.photos)
+        # Match faces to known users in family (if permission granted)
+
+    # Generate event names
+    for event in events:
+        event.suggested_name = generate_event_name(
+            event.date,
+            event.location,
+            event.photo_count,
+            event.participants
+        )
+
+    return events
+```
+
+**UI Design**:
+- Event suggestion cards in curator dashboard
+- "Review Event" button opens modal
+- Photo grid showing all detected event photos
+- Detected participants (faces, not names unless user has granted permission)
+- Three action buttons:
+  1. "Create Personal Album" - no sharing
+  2. "Create & Share" - opens participant selector
+  3. "Dismiss"
+
+**Privacy Considerations**:
+- Event detection runs per-user, not cross-user
+- Face matching only within user's own photo library
+- Sharing requires explicit user action
+- Users can disable event detection in preferences
+- No automatic notifications to other users
+- Cross-user event detection requires:
+  * Admin opt-in feature flag
+  * Multiple users opt-in to cross-user detection
+  * Clear privacy policy displayed
+
+**Admin Settings**:
+```yaml
+event_detection:
+  enabled: true  # Enable/disable globally
+  min_photos: 5  # Minimum photos to suggest an event
+  max_gap_hours: 4  # Maximum time gap within event
+  cross_user_detection: false  # Allow detecting multi-user events
+  require_user_optin: true  # Users must opt-in
+```
+
+**User Preferences**:
+```yaml
+event_detection:
+  enabled: true/false  # Show event suggestions
+  auto_detect: true/false  # Run detection automatically
+  cross_user_participation: false  # Allow cross-user event detection
+```
+
+**Security**:
+- Event suggestions are per-user
+- Sharing requires explicit action
+- No photo data shared without user confirmation
+- Face detection data never crosses user boundaries
+- Users can see who else uploaded to same event ONLY if:
+  * They explicitly create shared album
+  * Other users accept sharing invitation
+
+**TODO: Spec Needed from User**:
+1. Should cross-user event detection be supported at all?
+   - If yes: How to handle privacy/permissions?
+   - If no: Keep it strictly per-user suggestions
+2. Face recognition for participant detection?
+   - Immich has built-in face detection
+   - Should we use it for event suggestions?
+3. Sharing invitation workflow?
+   - Email invitations?
+   - In-app notifications?
+   - Both?
+4. Event categories/types?
+   - Birthdays, Holidays, Trips, Daily life, etc.
+   - Custom categories?
+
+---
+
 ### 7. Memory Lane / Automated Memories
 
 **Purpose**: Create engaging nostalgic experiences with automated memory compilations
