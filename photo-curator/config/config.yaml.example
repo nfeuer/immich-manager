@@ -6,8 +6,15 @@ server:
   workers: 2
 
 immich:
+  # Base URL for Immich (used for SSO authentication)
+  base_url: "http://localhost:2283"
+
+  # API URL for backend requests
   api_url: "http://localhost:2283/api"
-  api_key: ""  # Same as Server Manager
+
+  # API key (OPTIONAL - only needed for admin background jobs)
+  # Users authenticate via Immich SSO, so this is only for system tasks
+  api_key: ""  # Same as Server Manager (optional)
 
 ai:
   use_local_models: true

@@ -1,12 +1,11 @@
 """
 Main FastAPI application for Photo Curator Assistant
-Complete AI-powered photo curation with Immich integration
+Complete AI-powered photo curation with Immich authentication integration
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .database import Database
 from .immich_client import ImmichClient, PhotoCache
 from .analyzer import PhotoAnalyzer
+from .auth import ImmichAuth, get_current_user, get_current_user_optional, get_user_api_client
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Photo Curator Assistant",
-    description="AI-powered photo curation for Immich",
-    version="1.0.0"
+    description="AI-powered photo curation for Immich with SSO",
+    version="2.0.0"
 )
 
 # Enable CORS
@@ -43,7 +43,7 @@ app.add_middleware(
 # Global state
 config: Optional[Dict] = None
 database: Optional[Database] = None
-immich_client: Optional[ImmichClient] = None
+admin_immich_client: Optional[ImmichClient] = None  # Admin client for background jobs
 photo_cache: Optional[PhotoCache] = None
 analyzer: Optional[PhotoAnalyzer] = None
 scheduler: Optional[AsyncIOScheduler] = None
@@ -67,7 +67,7 @@ class AlbumCreate(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application"""
-    global config, database, immich_client, photo_cache, analyzer, scheduler
+    global config, database, admin_immich_client, photo_cache, analyzer, scheduler
 
     try:
         # Load configuration
@@ -79,26 +79,35 @@ async def startup_event():
             logger.warning("No config file found, using defaults")
             config = {
                 "server": {"host": "0.0.0.0", "port": 8081},
-                "immich": {"api_url": "http://localhost:2283/api", "api_key": ""},
+                "immich": {
+                    "base_url": "http://localhost:2283",
+                    "api_url": "http://localhost:2283/api",
+                    "api_key": ""  # Only needed for admin operations
+                },
                 "ai": {"use_local_models": True}
             }
 
         # Initialize database
         database = Database()
 
-        # Initialize Immich client
+        # Initialize Immich authentication
         immich_config = config.get("immich", {})
+        immich_base_url = immich_config.get("base_url", "http://localhost:2283")
+        app.state.immich_auth = ImmichAuth(immich_base_url)
+        app.state.immich_api_url = immich_config.get("api_url", f"{immich_base_url}/api")
+
+        # Initialize admin Immich client (for background jobs only)
         if immich_config.get("api_key"):
-            immich_client = ImmichClient(
+            admin_immich_client = ImmichClient(
                 immich_config["api_url"],
                 immich_config["api_key"]
             )
-            if immich_client.check_connection():
-                logger.info("✓ Connected to Immich API")
+            if admin_immich_client.check_connection():
+                logger.info("✓ Connected to Immich API (admin)")
             else:
                 logger.warning("⚠ Cannot connect to Immich API")
         else:
-            logger.warning("⚠ No Immich API key configured")
+            logger.warning("⚠ No admin API key configured (optional, only needed for background jobs)")
 
         # Initialize photo cache
         photo_cache = PhotoCache()
@@ -110,8 +119,9 @@ async def startup_event():
         scheduler = AsyncIOScheduler()
         scheduler.start()
 
-        logger.info("✓ Photo Curator started successfully")
+        logger.info("✓ Photo Curator started successfully (with Immich SSO)")
         logger.info(f"✓ Web UI: http://{config['server']['host']}:{config['server']['port']}")
+        logger.info(f"✓ Immich URL: {immich_base_url}")
 
     except Exception as e:
         logger.error(f"✗ Startup error: {e}")
@@ -125,45 +135,71 @@ async def shutdown_event():
         scheduler.shutdown()
 
 
+# Authentication check endpoint
+@app.get("/api/auth/check")
+async def check_auth(user: Optional[Dict] = Depends(get_current_user_optional)):
+    """Check if user is authenticated"""
+    if user:
+        return {
+            "authenticated": True,
+            "user": {
+                "id": user.get("id"),
+                "email": user.get("email"),
+                "name": user.get("name")
+            }
+        }
+    else:
+        immich_auth = app.state.immich_auth
+        return {
+            "authenticated": False,
+            "login_url": f"{immich_auth.immich_url}/auth/login"
+        }
+
+
 # Web UI
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):
     """Serve curator UI"""
+
+    # If not authenticated, redirect to Immich login
+    if not user:
+        immich_auth = app.state.immich_auth
+        login_url = immich_auth.login_redirect_url(request)
+        return RedirectResponse(url=login_url)
+
     html_path = Path(__file__).parent.parent / "static" / "curator.html"
     if html_path.exists():
         return html_path.read_text()
 
     # Return placeholder if static file doesn't exist
-    return """
+    return f"""
     <html>
         <head>
             <title>Photo Curator</title>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body {
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     background: #f5f5f5;
                     padding: 20px;
-                }
-                .container { max-width: 1400px; margin: 0 auto; }
-                .header {
+                }}
+                .container {{ max-width: 800px; margin: 0 auto; }}
+                .card {{
                     background: white;
                     padding: 30px;
                     border-radius: 12px;
-                    margin-bottom: 20px;
                     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                }
-                h1 { color: #2563eb; margin-bottom: 10px; }
-                .subtitle { color: #666; }
-                .card {
-                    background: white;
-                    padding: 20px;
-                    border-radius: 12px;
                     margin-bottom: 20px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                }
-                .button {
+                }}
+                h1 {{ color: #2563eb; margin-bottom: 10px; }}
+                .user-info {{
+                    background: #f0f9ff;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                }}
+                .button {{
                     background: #2563eb;
                     color: white;
                     border: none;
@@ -172,34 +208,20 @@ async def root():
                     cursor: pointer;
                     text-decoration: none;
                     display: inline-block;
-                    margin: 5px;
-                }
-                .button:hover { background: #1d4ed8; }
+                }}
             </style>
         </head>
         <body>
             <div class="container">
-                <div class="header">
-                    <h1>📸 Photo Curator Assistant</h1>
-                    <p class="subtitle">AI-powered photo curation for Immich</p>
-                </div>
-
                 <div class="card">
-                    <h2>Quick Start</h2>
-                    <p>Select a month to start curating:</p>
+                    <h1>📸 Photo Curator</h1>
+                    <div class="user-info">
+                        <strong>Logged in as:</strong> {user.get('name', user.get('email'))}
+                    </div>
+                    <p>Select a month to start curating your photos</p>
                     <br>
                     <a href="/curate" class="button">Start Curating</a>
                     <a href="/docs" class="button" style="background:#6b7280">API Docs</a>
-                </div>
-
-                <div class="card">
-                    <h2>How It Works</h2>
-                    <ol style="line-height:2">
-                        <li><strong>AI Analysis:</strong> Photos are scored based on quality, faces, and composition</li>
-                        <li><strong>Smart Suggestions:</strong> Top 50 photos are pre-selected for you</li>
-                        <li><strong>Your Control:</strong> Review, add, or remove photos as you like</li>
-                        <li><strong>Create Album:</strong> Save your curated selection to Immich</li>
-                    </ol>
                 </div>
             </div>
         </body>
@@ -207,64 +229,53 @@ async def root():
     """
 
 
-# API Endpoints
+# API Endpoints (all require authentication)
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint (no auth required)"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/status")
-async def get_status():
-    """Get curator status"""
-    immich_connected = False
-    if immich_client:
-        immich_connected = immich_client.check_connection()
-
+async def get_status(user: Dict = Depends(get_current_user)):
+    """Get curator status for authenticated user"""
     stats = database.get_statistics() if database else {}
+    user_progress = database.get_user_progress(user['id']) if database else {}
 
     return {
         "status": "running",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0",
-        "immich_connected": immich_connected,
+        "version": "2.0.0",
+        "user": {
+            "id": user['id'],
+            "email": user['email'],
+            "name": user.get('name')
+        },
+        "progress": user_progress,
         "statistics": stats
     }
 
 
-@app.get("/api/users")
-async def get_users():
-    """Get list of users from Immich"""
-    if not immich_client:
-        raise HTTPException(status_code=503, detail="Immich client not configured")
-
-    users = immich_client.get_users()
-
-    # Add progress info
-    for user in users:
-        progress = database.get_user_progress(user['id'])
-        user['curation_progress'] = progress
-
-    return {"users": users}
-
-
-@app.post("/api/analyze/{user_id}/{year}/{month}")
+@app.post("/api/analyze/{year}/{month}")
 async def analyze_month(
-    user_id: str,
     year: int,
     month: int,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    user: Dict = Depends(get_current_user)
 ):
-    """Analyze all photos for a user/month"""
-    if not immich_client or not analyzer or not database:
+    """Analyze all photos for authenticated user's month"""
+    if not admin_immich_client or not analyzer or not database:
         raise HTTPException(status_code=503, detail="Services not initialized")
+
+    user_id = user['id']
 
     # Start background analysis
     background_tasks.add_task(
         analyze_user_month_background,
         user_id,
         year,
-        month
+        month,
+        user['access_token']  # Use user's token
     )
 
     return {
@@ -274,13 +285,16 @@ async def analyze_month(
     }
 
 
-async def analyze_user_month_background(user_id: str, year: int, month: int):
-    """Background task to analyze photos"""
+async def analyze_user_month_background(user_id: str, year: int, month: int, user_token: str):
+    """Background task to analyze photos using user's credentials"""
     try:
         logger.info(f"Starting analysis for user {user_id}, {year}-{month:02d}")
 
-        # Fetch photos from Immich
-        photos = immich_client.get_user_photos(user_id, year, month)
+        # Create user-specific API client
+        user_client = ImmichClient(app.state.immich_api_url, user_token)
+
+        # Fetch photos from Immich (using user's credentials)
+        photos = user_client.get_user_photos(user_id, year, month)
 
         if not photos:
             logger.warning(f"No photos found for {year}-{month:02d}")
@@ -300,7 +314,7 @@ async def analyze_user_month_background(user_id: str, year: int, month: int):
             # Download photo (use thumbnail for speed)
             cached_path = photo_cache.get_cached_path(asset_id)
             if not cached_path:
-                photo_path = immich_client.download_photo(asset_id, use_thumbnail=True)
+                photo_path = user_client.download_photo(asset_id, use_thumbnail=True)
                 if photo_path:
                     cached_path = photo_cache.add_to_cache(asset_id, photo_path)
 
@@ -346,11 +360,17 @@ async def analyze_user_month_background(user_id: str, year: int, month: int):
         logger.error(f"Error in background analysis: {e}")
 
 
-@app.get("/api/photos/{user_id}/{year}/{month}")
-async def get_monthly_photos(user_id: str, year: int, month: int):
-    """Get photos with scores for a month"""
+@app.get("/api/photos/{year}/{month}")
+async def get_monthly_photos(
+    year: int,
+    month: int,
+    user: Dict = Depends(get_current_user)
+):
+    """Get photos with scores for authenticated user's month"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
+
+    user_id = user['id']
 
     # Get scores from database
     scores = database.get_photo_scores(user_id, year, month)
@@ -372,16 +392,18 @@ async def get_monthly_photos(user_id: str, year: int, month: int):
     }
 
 
-@app.post("/api/curation/{user_id}/{year}/{month}/update")
+@app.post("/api/curation/{year}/{month}/update")
 async def update_curation(
-    user_id: str,
     year: int,
     month: int,
-    selection: CurationSelection
+    selection: CurationSelection,
+    user: Dict = Depends(get_current_user)
 ):
-    """Update user's curation selections"""
+    """Update authenticated user's curation selections"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
+
+    user_id = user['id']
 
     database.update_curation_session(
         user_id,
@@ -398,20 +420,25 @@ async def update_curation(
     }
 
 
-@app.post("/api/curation/{user_id}/{year}/{month}/complete")
+@app.post("/api/curation/{year}/{month}/complete")
 async def complete_curation(
-    user_id: str,
     year: int,
     month: int,
-    album_data: AlbumCreate
+    album_data: AlbumCreate,
+    user: Dict = Depends(get_current_user)
 ):
-    """Complete curation and create album in Immich"""
-    if not database or not immich_client:
-        raise HTTPException(status_code=503, detail="Services not initialized")
+    """Complete curation and create album in Immich (using user's credentials)"""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    user_id = user['id']
 
     try:
-        # Create album in Immich
-        album = immich_client.create_album(
+        # Create user-specific API client
+        user_client = ImmichClient(app.state.immich_api_url, user['access_token'])
+
+        # Create album in Immich (as the user)
+        album = user_client.create_album(
             album_data.album_name,
             album_data.asset_ids,
             album_data.description
@@ -440,12 +467,13 @@ async def complete_curation(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/progress/{user_id}")
-async def get_user_progress(user_id: str):
-    """Get user's curation progress"""
+@app.get("/api/progress")
+async def get_user_progress(user: Dict = Depends(get_current_user)):
+    """Get authenticated user's curation progress"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
 
+    user_id = user['id']
     progress = database.get_user_progress(user_id)
     preferences = database.get_user_preferences(user_id)
 
@@ -457,8 +485,8 @@ async def get_user_progress(user_id: str):
 
 
 @app.get("/api/stats")
-async def get_statistics():
-    """Get overall statistics"""
+async def get_statistics(user: Dict = Depends(get_current_user)):
+    """Get overall statistics (accessible to all authenticated users)"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
 

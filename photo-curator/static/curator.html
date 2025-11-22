@@ -45,6 +45,17 @@
             margin-top: 5px;
         }
 
+        .user-info {
+            text-align: right;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
         .controls {
             background: white;
             padding: 20px 30px;
@@ -294,19 +305,14 @@
                 <h1>📸 Photo Curator</h1>
                 <p class="subtitle">AI-powered monthly photo selection</p>
             </div>
-            <div>
-                <button class="button button-secondary" onclick="location.href='/docs'">API Docs</button>
+            <div class="user-info">
+                <div>Logged in as:</div>
+                <div class="user-name" id="userName">Loading...</div>
             </div>
         </div>
 
         <div class="controls">
             <div class="control-row">
-                <div>
-                    <label>User:</label>
-                    <select id="userSelect" onchange="onUserChanged()">
-                        <option value="">Select user...</option>
-                    </select>
-                </div>
                 <div>
                     <label>Year:</label>
                     <input type="number" id="yearInput" value="2024" min="2020" max="2030" />
@@ -335,7 +341,7 @@
 
         <div id="content">
             <div class="loading">
-                <p>Select a user and month to start curating</p>
+                <p>Select a month to start curating your photos</p>
             </div>
         </div>
 
@@ -364,40 +370,37 @@
         let currentView = 'ai';
 
         // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             const now = new Date();
             document.getElementById('yearInput').value = now.getFullYear();
             document.getElementById('monthSelect').value = now.getMonth() + 1;
-            loadUsers();
+
+            // Check authentication
+            await checkAuth();
         });
 
-        async function loadUsers() {
+        async function checkAuth() {
             try {
-                const response = await fetch('/api/users');
+                const response = await fetch('/api/auth/check');
                 const data = await response.json();
 
-                const select = document.getElementById('userSelect');
-                data.users.forEach(user => {
-                    const option = document.createElement('option');
-                    option.value = user.id;
-                    option.textContent = user.name || user.email;
-                    select.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading users:', error);
-            }
-        }
+                if (!data.authenticated) {
+                    // Redirect to login
+                    window.location.href = data.login_url;
+                    return;
+                }
 
-        function onUserChanged() {
-            currentUser = document.getElementById('userSelect').value;
+                // Set current user
+                currentUser = data.user;
+                document.getElementById('userName').textContent = data.user.name || data.user.email;
+
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                alert('Authentication failed. Please login to Immich first.');
+            }
         }
 
         async function loadPhotos() {
-            if (!currentUser) {
-                alert('Please select a user first');
-                return;
-            }
-
             currentYear = parseInt(document.getElementById('yearInput').value);
             currentMonth = parseInt(document.getElementById('monthSelect').value);
 
@@ -405,7 +408,7 @@
             content.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading photos...</p></div>';
 
             try {
-                const response = await fetch(`/api/photos/${currentUser}/${currentYear}/${currentMonth}`);
+                const response = await fetch(`/api/photos/${currentYear}/${currentMonth}`);
                 const data = await response.json();
 
                 allPhotos = data.photos || [];
@@ -427,11 +430,6 @@
         }
 
         async function analyzeMonth() {
-            if (!currentUser) {
-                alert('Please select a user first');
-                return;
-            }
-
             currentYear = parseInt(document.getElementById('yearInput').value);
             currentMonth = parseInt(document.getElementById('monthSelect').value);
 
@@ -440,7 +438,7 @@
             }
 
             try {
-                const response = await fetch(`/api/analyze/${currentUser}/${currentYear}/${currentMonth}`, {
+                const response = await fetch(`/api/analyze/${currentYear}/${currentMonth}`, {
                     method: 'POST'
                 });
 
@@ -561,14 +559,12 @@
         }
 
         async function saveSelection() {
-            if (!currentUser) return;
-
             const selected = Array.from(selectedPhotos);
             const added = selected.filter(id => !aiSuggested.includes(id));
             const removed = aiSuggested.filter(id => !selectedPhotos.has(id));
 
             try {
-                await fetch(`/api/curation/${currentUser}/${currentYear}/${currentMonth}/update`, {
+                await fetch(`/api/curation/${currentYear}/${currentMonth}/update`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ selected, added, removed })
@@ -595,7 +591,7 @@
             document.getElementById('createAlbumBtn').textContent = 'Creating...';
 
             try {
-                const response = await fetch(`/api/curation/${currentUser}/${currentYear}/${currentMonth}/complete`, {
+                const response = await fetch(`/api/curation/${currentYear}/${currentMonth}/complete`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
