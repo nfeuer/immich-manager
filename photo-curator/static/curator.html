@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Curator - Immich</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            color: #2563eb;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .controls {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        select, input {
+            padding: 10px 15px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .button:hover {
+            background: #1d4ed8;
+        }
+
+        .button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .button-secondary {
+            background: #6b7280;
+        }
+
+        .button-secondary:hover {
+            background: #4b5563;
+        }
+
+        .button-success {
+            background: #10b981;
+        }
+
+        .button-success:hover {
+            background: #059669;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: white;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .tab.active {
+            background: #2563eb;
+            color: white;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .stat-label {
+            color: #6b7280;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            color: #1f2937;
+            font-size: 24px;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+
+        .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .photo-card {
+            position: relative;
+            aspect-ratio: 1;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            background: #e5e7eb;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .photo-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .photo-card.selected {
+            outline: 4px solid #2563eb;
+            outline-offset: -4px;
+        }
+
+        .photo-card.ai-suggested {
+            border: 3px solid #10b981;
+        }
+
+        .photo-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .photo-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .ai-badge {
+            background: #10b981;
+        }
+
+        .score-badge {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6b7280;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e5e7eb;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .footer-actions {
+            position: sticky;
+            bottom: 0;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+        }
+
+        .selection-info {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .selection-count {
+            font-weight: 600;
+            color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>📸 Photo Curator</h1>
+                <p class="subtitle">AI-powered monthly photo selection</p>
+            </div>
+            <div>
+                <button class="button button-secondary" onclick="location.href='/docs'">API Docs</button>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div>
+                    <label>User:</label>
+                    <select id="userSelect" onchange="onUserChanged()">
+                        <option value="">Select user...</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Year:</label>
+                    <input type="number" id="yearInput" value="2024" min="2020" max="2030" />
+                </div>
+                <div>
+                    <label>Month:</label>
+                    <select id="monthSelect">
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                    </select>
+                </div>
+                <button class="button" onclick="loadPhotos()">Load Photos</button>
+                <button class="button button-secondary" onclick="analyzeMonth()">Analyze with AI</button>
+            </div>
+        </div>
+
+        <div id="content">
+            <div class="loading">
+                <p>Select a user and month to start curating</p>
+            </div>
+        </div>
+
+        <div id="footer" style="display:none">
+            <div class="footer-actions">
+                <div class="selection-info">
+                    Selected: <span class="selection-count" id="selectionCount">0</span> photos
+                    <span id="aiSuggestedCount"></span>
+                </div>
+                <div>
+                    <button class="button button-success" onclick="createAlbum()" id="createAlbumBtn">
+                        Create Album in Immich
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let currentYear = 2024;
+        let currentMonth = new Date().getMonth() + 1;
+        let allPhotos = [];
+        let aiSuggested = [];
+        let selectedPhotos = new Set();
+        let currentView = 'ai';
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            const now = new Date();
+            document.getElementById('yearInput').value = now.getFullYear();
+            document.getElementById('monthSelect').value = now.getMonth() + 1;
+            loadUsers();
+        });
+
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/users');
+                const data = await response.json();
+
+                const select = document.getElementById('userSelect');
+                data.users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.name || user.email;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading users:', error);
+            }
+        }
+
+        function onUserChanged() {
+            currentUser = document.getElementById('userSelect').value;
+        }
+
+        async function loadPhotos() {
+            if (!currentUser) {
+                alert('Please select a user first');
+                return;
+            }
+
+            currentYear = parseInt(document.getElementById('yearInput').value);
+            currentMonth = parseInt(document.getElementById('monthSelect').value);
+
+            const content = document.getElementById('content');
+            content.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading photos...</p></div>';
+
+            try {
+                const response = await fetch(`/api/photos/${currentUser}/${currentYear}/${currentMonth}`);
+                const data = await response.json();
+
+                allPhotos = data.photos || [];
+                const session = data.session;
+
+                if (session) {
+                    aiSuggested = session.ai_suggested || [];
+                    selectedPhotos = new Set(session.user_selected || aiSuggested);
+                } else {
+                    aiSuggested = [];
+                    selectedPhotos = new Set();
+                }
+
+                renderUI();
+            } catch (error) {
+                console.error('Error loading photos:', error);
+                content.innerHTML = `<div class="alert alert-warning">Error loading photos. ${error.message}</div>`;
+            }
+        }
+
+        async function analyzeMonth() {
+            if (!currentUser) {
+                alert('Please select a user first');
+                return;
+            }
+
+            currentYear = parseInt(document.getElementById('yearInput').value);
+            currentMonth = parseInt(document.getElementById('monthSelect').value);
+
+            if (!confirm(`Analyze all photos for ${getMonthName(currentMonth)} ${currentYear}? This may take a few minutes.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/analyze/${currentUser}/${currentYear}/${currentMonth}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+                alert(`Analysis started! Refresh in a few minutes to see results.`);
+            } catch (error) {
+                alert('Error starting analysis: ' + error.message);
+            }
+        }
+
+        function renderUI() {
+            const content = document.getElementById('content');
+
+            if (allPhotos.length === 0) {
+                content.innerHTML = `
+                    <div class="alert alert-info">
+                        No photos found for ${getMonthName(currentMonth)} ${currentYear}.<br>
+                        Try analyzing the month first or select a different month.
+                    </div>
+                `;
+                return;
+            }
+
+            // Show stats
+            const aiCount = aiSuggested.length;
+            const selectedCount = selectedPhotos.size;
+
+            content.innerHTML = `
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Photos</div>
+                        <div class="stat-value">${allPhotos.length}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">AI Suggested</div>
+                        <div class="stat-value">${aiCount}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Selected</div>
+                        <div class="stat-value">${selectedCount}</div>
+                    </div>
+                </div>
+
+                <div class="tabs">
+                    <button class="tab active" onclick="switchView('ai')">AI Suggested (${aiCount})</button>
+                    <button class="tab" onclick="switchView('all')">All Photos (${allPhotos.length})</button>
+                </div>
+
+                <div id="photoGrid" class="photo-grid"></div>
+            `;
+
+            renderPhotos();
+
+            // Show footer
+            document.getElementById('footer').style.display = 'block';
+            updateSelectionCount();
+        }
+
+        function switchView(view) {
+            currentView = view;
+
+            // Update tabs
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach((tab, index) => {
+                tab.classList.toggle('active', (view === 'ai' && index === 0) || (view === 'all' && index === 1));
+            });
+
+            renderPhotos();
+        }
+
+        function renderPhotos() {
+            const grid = document.getElementById('photoGrid');
+            if (!grid) return;
+
+            const photosToShow = currentView === 'ai'
+                ? allPhotos.filter(p => aiSuggested.includes(p.asset_id))
+                : allPhotos;
+
+            grid.innerHTML = photosToShow.map(photo => {
+                const isSelected = selectedPhotos.has(photo.asset_id);
+                const isAISuggested = aiSuggested.includes(photo.asset_id);
+
+                return `
+                    <div class="photo-card ${isSelected ? 'selected' : ''} ${isAISuggested ? 'ai-suggested' : ''}"
+                         onclick="togglePhoto('${photo.asset_id}')">
+                        <img class="photo-img" src="https://via.placeholder.com/200" alt="Photo"
+                             onerror="this.src='https://via.placeholder.com/200?text=Photo'">
+                        ${isAISuggested ? '<div class="photo-badge ai-badge">AI Pick</div>' : ''}
+                        <div class="score-badge">⭐ ${(photo.score * 100).toFixed(0)}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function togglePhoto(assetId) {
+            if (selectedPhotos.has(assetId)) {
+                selectedPhotos.delete(assetId);
+            } else {
+                selectedPhotos.add(assetId);
+            }
+
+            renderPhotos();
+            updateSelectionCount();
+            saveSelection();
+        }
+
+        function updateSelectionCount() {
+            document.getElementById('selectionCount').textContent = selectedPhotos.size;
+
+            const aiCount = Array.from(selectedPhotos).filter(id => aiSuggested.includes(id)).length;
+            const userAddedCount = selectedPhotos.size - aiCount;
+
+            let text = '';
+            if (userAddedCount > 0) {
+                text = ` (${aiCount} AI + ${userAddedCount} added by you)`;
+            }
+            document.getElementById('aiSuggestedCount').textContent = text;
+        }
+
+        async function saveSelection() {
+            if (!currentUser) return;
+
+            const selected = Array.from(selectedPhotos);
+            const added = selected.filter(id => !aiSuggested.includes(id));
+            const removed = aiSuggested.filter(id => !selectedPhotos.has(id));
+
+            try {
+                await fetch(`/api/curation/${currentUser}/${currentYear}/${currentMonth}/update`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ selected, added, removed })
+                });
+            } catch (error) {
+                console.error('Error saving selection:', error);
+            }
+        }
+
+        async function createAlbum() {
+            if (selectedPhotos.size === 0) {
+                alert('Please select at least one photo');
+                return;
+            }
+
+            const albumName = prompt(
+                'Album name:',
+                `Best of ${getMonthName(currentMonth)} ${currentYear}`
+            );
+
+            if (!albumName) return;
+
+            document.getElementById('createAlbumBtn').disabled = true;
+            document.getElementById('createAlbumBtn').textContent = 'Creating...';
+
+            try {
+                const response = await fetch(`/api/curation/${currentUser}/${currentYear}/${currentMonth}/complete`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        asset_ids: Array.from(selectedPhotos),
+                        album_name: albumName,
+                        description: `Curated collection of ${selectedPhotos.size} photos`
+                    })
+                });
+
+                const data = await response.json();
+
+                alert(`✓ Album "${albumName}" created with ${selectedPhotos.size} photos!`);
+
+                document.getElementById('createAlbumBtn').textContent = '✓ Album Created';
+            } catch (error) {
+                alert('Error creating album: ' + error.message);
+                document.getElementById('createAlbumBtn').disabled = false;
+                document.getElementById('createAlbumBtn').textContent = 'Create Album';
+            }
+        }
+
+        function getMonthName(month) {
+            const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December'];
+            return months[month - 1];
+        }
+    </script>
+</body>
+</html>
