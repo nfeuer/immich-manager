@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preferences - Immich Photo Curator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'immich-primary': '#4250af',
+                        'immich-bg': '#000000',
+                        'immich-gray': {
+                            50: '#f9fafb',
+                            100: '#f3f4f6',
+                            200: '#e5e7eb',
+                            300: '#d1d5db',
+                            400: '#9ca3af',
+                            500: '#6b7280',
+                            600: '#4b5563',
+                            700: '#374151',
+                            800: '#1f2937',
+                            900: '#111827',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-black dark:bg-immich-bg text-gray-900 dark:text-gray-100 min-h-screen">
+    <div class="max-w-[1200px] mx-auto">
+        <!-- Header -->
+        <header class="bg-white dark:bg-immich-gray-900 border-b border-gray-200 dark:border-immich-gray-800">
+            <div class="px-4 sm:px-6 lg:px-8 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-8 h-8 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                        </svg>
+                        <div>
+                            <h1 class="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">Preferences</h1>
+                            <p class="text-sm text-gray-500 dark:text-immich-gray-400 hidden sm:block">Manage your notification and curation settings</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="text-sm text-immich-primary hover:underline">← Back to Curator</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Content -->
+        <div class="px-4 sm:px-6 lg:px-8 py-8">
+            <div id="saveAlert" class="hidden mb-6"></div>
+
+            <!-- Email Notifications Section -->
+            <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">📧 Email Notifications</h2>
+                <p class="text-sm text-gray-600 dark:text-immich-gray-400 mb-6">Choose which email notifications you'd like to receive. All emails are opt-in.</p>
+
+                <div class="space-y-4">
+                    <label class="flex items-start cursor-pointer">
+                        <input type="checkbox" id="emailMonthlyReminders" class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-immich-primary focus:ring-immich-primary">
+                        <div class="ml-3">
+                            <div class="font-medium text-gray-900 dark:text-white">Monthly Curation Reminders</div>
+                            <p class="text-sm text-gray-600 dark:text-immich-gray-400">Get reminded on the 1st of each month to curate your photos</p>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start cursor-pointer opacity-50">
+                        <input type="checkbox" id="emailQualityAlerts" disabled class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-immich-primary focus:ring-immich-primary">
+                        <div class="ml-3">
+                            <div class="font-medium text-gray-900 dark:text-white">Photo Quality Alerts <span class="text-xs text-gray-500">(Coming Soon)</span></div>
+                            <p class="text-sm text-gray-600 dark:text-immich-gray-400">Receive tips when photo quality trends downward</p>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start cursor-pointer opacity-50">
+                        <input type="checkbox" id="emailMemoryLane" disabled class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-immich-primary focus:ring-immich-primary">
+                        <div class="ml-3">
+                            <div class="font-medium text-gray-900 dark:text-white">Memory Lane <span class="text-xs text-gray-500">(Coming Soon)</span></div>
+                            <p class="text-sm text-gray-600 dark:text-immich-gray-400">"On This Day" memories from past years</p>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start cursor-pointer opacity-50">
+                        <input type="checkbox" id="emailSeasonalAutomations" disabled class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-immich-primary focus:ring-immich-primary">
+                        <div class="ml-3">
+                            <div class="font-medium text-gray-900 dark:text-white">Seasonal Automations <span class="text-xs text-gray-500">(Coming Soon)</span></div>
+                            <p class="text-sm text-gray-600 dark:text-immich-gray-400">Year-end reviews, birthday albums, and more</p>
+                        </div>
+                    </label>
+
+                    <div class="pt-4 border-t border-gray-200 dark:border-immich-gray-700">
+                        <label class="flex items-start">
+                            <input type="checkbox" id="emailStorageWarnings" checked disabled class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-red-600 focus:ring-red-600">
+                            <div class="ml-3">
+                                <div class="font-medium text-gray-900 dark:text-white">Storage Warnings <span class="text-xs text-red-600">(Critical - Always On)</span></div>
+                                <p class="text-sm text-gray-600 dark:text-immich-gray-400">Alerts when approaching storage quota (cannot be disabled)</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Curation Settings Section -->
+            <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">🎯 Curation Settings</h2>
+                <p class="text-sm text-gray-600 dark:text-immich-gray-400 mb-6">Customize how the AI curates your photos</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-immich-gray-300 mb-2">
+                            Monthly Target
+                            <span class="text-gray-500 dark:text-immich-gray-400 font-normal ml-2">(How many photos per month)</span>
+                        </label>
+                        <input type="number" id="monthlyTarget" min="10" max="200" value="50"
+                            class="w-full sm:w-64 px-4 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none">
+                        <p class="text-xs text-gray-500 dark:text-immich-gray-500 mt-1">The AI will try to select this many best photos each month</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- UI Preferences Section -->
+            <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">🎨 UI Suggestions</h2>
+                <p class="text-sm text-gray-600 dark:text-immich-gray-400 mb-6">Control what suggestions appear in the interface</p>
+
+                <div class="space-y-4">
+                    <label class="flex items-start cursor-pointer opacity-50">
+                        <input type="checkbox" id="uiSharingsuggestions" disabled class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-immich-primary focus:ring-immich-primary">
+                        <div class="ml-3">
+                            <div class="font-medium text-gray-900 dark:text-white">Sharing Suggestions <span class="text-xs text-gray-500">(Coming Soon)</span></div>
+                            <p class="text-sm text-gray-600 dark:text-immich-gray-400">Suggest sharing photos with family members</p>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start cursor-pointer opacity-50">
+                        <input type="checkbox" id="uiEventDetection" disabled class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-immich-primary focus:ring-immich-primary">
+                        <div class="ml-3">
+                            <div class="font-medium text-gray-900 dark:text-white">Event Detection <span class="text-xs text-gray-500">(Coming Soon)</span></div>
+                            <p class="text-sm text-gray-600 dark:text-immich-gray-400">Show suggestions for detected events</p>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start cursor-pointer">
+                        <input type="checkbox" id="uiDuplicateWarnings" checked class="mt-1 h-5 w-5 rounded border-gray-300 dark:border-immich-gray-600 text-immich-primary focus:ring-immich-primary">
+                        <div class="ml-3">
+                            <div class="font-medium text-gray-900 dark:text-white">Duplicate Warnings</div>
+                            <p class="text-sm text-gray-600 dark:text-immich-gray-400">Show alerts when duplicates are detected</p>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Save Button -->
+            <div class="flex justify-end">
+                <button onclick="savePreferences()" id="saveBtn"
+                    class="px-6 py-2.5 bg-immich-primary hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm hover:shadow-md">
+                    Save Preferences
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+
+        document.addEventListener('DOMContentLoaded', async function() {
+            await checkAuth();
+            await loadPreferences();
+        });
+
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/check');
+                const data = await response.json();
+
+                if (!data.authenticated) {
+                    window.location.href = data.login_url;
+                    return;
+                }
+
+                currentUser = data.user;
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                alert('Authentication failed. Please login to Immich first.');
+            }
+        }
+
+        async function loadPreferences() {
+            try {
+                const response = await fetch('/api/preferences');
+                const prefs = await response.json();
+
+                // Email notifications
+                document.getElementById('emailMonthlyReminders').checked = prefs.email_notifications?.monthly_reminders || false;
+
+                // Curation settings
+                document.getElementById('monthlyTarget').value = prefs.monthly_target || 50;
+
+                // UI suggestions
+                document.getElementById('uiDuplicateWarnings').checked = prefs.ui_suggestions?.duplicate_warnings !== false;
+
+            } catch (error) {
+                console.error('Error loading preferences:', error);
+            }
+        }
+
+        async function savePreferences() {
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            try {
+                const prefs = {
+                    email_notifications: {
+                        monthly_reminders: document.getElementById('emailMonthlyReminders').checked,
+                        quality_alerts: false,
+                        memory_lane: false,
+                        seasonal_automations: false,
+                        storage_warnings: true  // Always enabled
+                    },
+                    monthly_target: parseInt(document.getElementById('monthlyTarget').value),
+                    ui_suggestions: {
+                        sharing_suggestions: false,
+                        event_detection: false,
+                        duplicate_warnings: document.getElementById('uiDuplicateWarnings').checked
+                    }
+                };
+
+                const response = await fetch('/api/preferences', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(prefs)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to save preferences');
+                }
+
+                showAlert('success', '✓ Preferences saved successfully!');
+                btn.textContent = 'Save Preferences';
+                btn.disabled = false;
+
+            } catch (error) {
+                console.error('Error saving preferences:', error);
+                showAlert('error', 'Failed to save preferences: ' + error.message);
+                btn.textContent = 'Save Preferences';
+                btn.disabled = false;
+            }
+        }
+
+        function showAlert(type, message) {
+            const alertEl = document.getElementById('saveAlert');
+            const colors = {
+                success: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200',
+                error: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+            };
+
+            alertEl.className = `${colors[type]} border rounded-lg p-4`;
+            alertEl.textContent = message;
+            alertEl.classList.remove('hidden');
+
+            setTimeout(() => {
+                alertEl.classList.add('hidden');
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
