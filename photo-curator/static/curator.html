@@ -325,6 +325,7 @@
             renderPhotos();
             document.getElementById('footer').classList.remove('hidden');
             updateSelectionCount();
+            resetFocus();
         }
 
         function switchView(view) {
@@ -343,15 +344,16 @@
             grid.innerHTML = photosToShow.map(photo => {
                 const isSelected = selectedPhotos.has(photo.asset_id);
                 const isAISuggested = aiSuggested.includes(photo.asset_id);
+                const thumbnailUrl = photo.thumbnail_url || 'https://via.placeholder.com/300?text=No+Image';
 
                 return `
                     <div class="photo-card relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-gray-100 dark:bg-immich-gray-800 group ${isSelected ? 'ring-4 ring-immich-primary ring-offset-2 dark:ring-offset-immich-bg' : ''} ${isAISuggested ? 'ring-2 ring-green-500' : ''}"
                          onclick="togglePhoto('${photo.asset_id}')">
                         <img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                             src="https://via.placeholder.com/300"
+                             src="${thumbnailUrl}"
                              alt="Photo"
                              loading="lazy"
-                             onerror="this.src='https://via.placeholder.com/300?text=Photo'">
+                             onerror="this.src='https://via.placeholder.com/300?text=Error'">
 
                         <!-- Overlay on hover -->
                         <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 flex items-center justify-center">
@@ -451,6 +453,119 @@
             const months = ['January', 'February', 'March', 'April', 'May', 'June',
                           'July', 'August', 'September', 'October', 'November', 'December'];
             return months[month - 1];
+        }
+
+        // Keyboard shortcuts
+        let focusedPhotoIndex = -1;
+
+        document.addEventListener('keydown', function(e) {
+            // Don't trigger shortcuts if typing in input fields
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+                return;
+            }
+
+            const photosToShow = currentView === 'ai'
+                ? allPhotos.filter(p => aiSuggested.includes(p.asset_id))
+                : allPhotos;
+
+            if (photosToShow.length === 0) return;
+
+            // Space: Toggle current photo
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (focusedPhotoIndex >= 0 && focusedPhotoIndex < photosToShow.length) {
+                    togglePhoto(photosToShow[focusedPhotoIndex].asset_id);
+                    updateFocusVisual();
+                }
+            }
+
+            // Arrow Right: Next photo
+            else if (e.code === 'ArrowRight') {
+                e.preventDefault();
+                focusedPhotoIndex = Math.min(focusedPhotoIndex + 1, photosToShow.length - 1);
+                updateFocusVisual();
+            }
+
+            // Arrow Left: Previous photo
+            else if (e.code === 'ArrowLeft') {
+                e.preventDefault();
+                focusedPhotoIndex = Math.max(focusedPhotoIndex - 1, 0);
+                updateFocusVisual();
+            }
+
+            // Arrow Down: Move down one row (assuming 8 cols on large screen, adjust based on viewport)
+            else if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                const cols = getGridColumns();
+                focusedPhotoIndex = Math.min(focusedPhotoIndex + cols, photosToShow.length - 1);
+                updateFocusVisual();
+            }
+
+            // Arrow Up: Move up one row
+            else if (e.code === 'ArrowUp') {
+                e.preventDefault();
+                const cols = getGridColumns();
+                focusedPhotoIndex = Math.max(focusedPhotoIndex - cols, 0);
+                updateFocusVisual();
+            }
+
+            // Escape: Clear selection
+            else if (e.code === 'Escape') {
+                e.preventDefault();
+                selectedPhotos.clear();
+                renderPhotos();
+                updateSelectionCount();
+                saveSelection();
+            }
+
+            // Ctrl/Cmd + A: Select all visible photos
+            else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
+                e.preventDefault();
+                photosToShow.forEach(photo => selectedPhotos.add(photo.asset_id));
+                renderPhotos();
+                updateSelectionCount();
+                saveSelection();
+            }
+
+            // Enter: Create album (if photos selected)
+            else if (e.code === 'Enter' && selectedPhotos.size > 0) {
+                e.preventDefault();
+                createAlbum();
+            }
+        });
+
+        function getGridColumns() {
+            // Detect number of columns based on viewport width
+            const width = window.innerWidth;
+            if (width >= 1536) return 8;  // 2xl
+            if (width >= 1280) return 6;  // xl
+            if (width >= 1024) return 5;  // lg
+            if (width >= 768) return 4;   // md
+            if (width >= 640) return 3;   // sm
+            return 2;  // mobile
+        }
+
+        function updateFocusVisual() {
+            // Remove previous focus
+            document.querySelectorAll('.photo-card').forEach(card => {
+                card.classList.remove('ring-2', 'ring-yellow-400');
+            });
+
+            // Add focus to current photo
+            const cards = document.querySelectorAll('.photo-card');
+            if (focusedPhotoIndex >= 0 && focusedPhotoIndex < cards.length) {
+                const card = cards[focusedPhotoIndex];
+                card.classList.add('ring-2', 'ring-yellow-400');
+
+                // Scroll into view if needed
+                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        // Reset focus when switching views or loading new photos
+        function resetFocus() {
+            focusedPhotoIndex = 0;
+            updateFocusVisual();
         }
     </script>
 </body>

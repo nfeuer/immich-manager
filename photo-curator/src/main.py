@@ -375,6 +375,13 @@ async def get_monthly_photos(
     # Get scores from database
     scores = database.get_photo_scores(user_id, year, month)
 
+    # Create user-specific API client for thumbnail URLs
+    user_client = ImmichClient(app.state.immich_api_url, user['access_token'])
+
+    # Add thumbnail URLs to each photo
+    for photo in scores:
+        photo['thumbnail_url'] = user_client.get_thumbnail_url(photo['asset_id'])
+
     # Get curation session
     session = database.get_curation_session(user_id, year, month)
 

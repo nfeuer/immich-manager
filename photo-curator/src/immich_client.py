@@ -310,6 +310,18 @@ class ImmichClient:
             logger.error(f"Error fetching statistics: {e}")
             return {}
 
+    def get_thumbnail_url(self, asset_id: str) -> str:
+        """
+        Get thumbnail URL for an asset
+
+        Args:
+            asset_id: Asset ID
+
+        Returns:
+            Thumbnail URL with API key
+        """
+        return f"{self.api_url}/assets/{asset_id}/thumbnail?key={self.api_key}"
+
     def check_connection(self) -> bool:
         """
         Check if API connection is working
