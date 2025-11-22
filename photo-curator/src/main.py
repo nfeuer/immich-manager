@@ -20,6 +20,7 @@ from .database import Database
 from .immich_client import ImmichClient, PhotoCache
 from .analyzer import PhotoAnalyzer
 from .auth import ImmichAuth, get_current_user, get_current_user_optional, get_user_api_client
+from .notifications import EmailNotifier
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +48,7 @@ admin_immich_client: Optional[ImmichClient] = None  # Admin client for backgroun
 photo_cache: Optional[PhotoCache] = None
 analyzer: Optional[PhotoAnalyzer] = None
 scheduler: Optional[AsyncIOScheduler] = None
+email_notifier: Optional[EmailNotifier] = None
 
 
 # Request models
@@ -67,7 +69,7 @@ class AlbumCreate(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application"""
-    global config, database, admin_immich_client, photo_cache, analyzer, scheduler
+    global config, database, admin_immich_client, photo_cache, analyzer, scheduler, email_notifier
 
     try:
         # Load configuration
@@ -84,7 +86,8 @@ async def startup_event():
                     "api_url": "http://localhost:2283/api",
                     "api_key": ""  # Only needed for admin operations
                 },
-                "ai": {"use_local_models": True}
+                "ai": {"use_local_models": True},
+                "notifications": {"email": {"enabled": False}}
             }
 
         # Initialize database
@@ -95,6 +98,7 @@ async def startup_event():
         immich_base_url = immich_config.get("base_url", "http://localhost:2283")
         app.state.immich_auth = ImmichAuth(immich_base_url)
         app.state.immich_api_url = immich_config.get("api_url", f"{immich_base_url}/api")
+        app.state.immich_base_url = immich_base_url  # Store for email links
 
         # Initialize admin Immich client (for background jobs only)
         if immich_config.get("api_key"):
@@ -115,9 +119,41 @@ async def startup_event():
         # Initialize analyzer
         analyzer = PhotoAnalyzer(config)
 
+        # Initialize email notifier
+        # ADMIN TODO: Configure SMTP settings in config/config.yaml
+        # Set notifications.email.enabled = true and fill in:
+        # - smtp_host (e.g., "smtp.gmail.com")
+        # - smtp_port (e.g., 587)
+        # - smtp_user (your email)
+        # - smtp_password (app password for Gmail, not regular password)
+        # - from (sender email address)
+        email_config = config.get("notifications", {}).get("email", {})
+        email_notifier = EmailNotifier(email_config)
+        if email_notifier.enabled:
+            logger.info("✓ Email notifications enabled")
+        else:
+            logger.info("ℹ Email notifications disabled (configure in config.yaml to enable)")
+
         # Initialize scheduler (for background jobs)
         scheduler = AsyncIOScheduler()
+
+        # Schedule monthly reminder job
+        # ADMIN TODO: This will run daily at 9 AM and check if it's the 1st of the month
+        # Customize the time in config.yaml under curation.reminder_time
+        reminder_time = config.get("curation", {}).get("reminder_time", "09:00")
+        hour, minute = map(int, reminder_time.split(":"))
+
+        scheduler.add_job(
+            send_monthly_reminders,
+            'cron',
+            hour=hour,
+            minute=minute,
+            id='monthly_reminders',
+            replace_existing=True
+        )
+
         scheduler.start()
+        logger.info(f"✓ Scheduler started (monthly reminders at {reminder_time})")
 
         logger.info("✓ Photo Curator started successfully (with Immich SSO)")
         logger.info(f"✓ Web UI: http://{config['server']['host']}:{config['server']['port']}")
@@ -133,6 +169,82 @@ async def shutdown_event():
     """Cleanup on shutdown"""
     if scheduler:
         scheduler.shutdown()
+
+
+# Background job for monthly reminders
+async def send_monthly_reminders():
+    """
+    Send monthly curation reminders to users who have opted in
+    Runs daily but only sends on the 1st of each month
+    """
+    try:
+        now = datetime.now()
+
+        # Only send on the 1st of the month
+        if now.day != 1:
+            return
+
+        logger.info("Running monthly reminder job...")
+
+        if not database or not admin_immich_client or not email_notifier or not email_notifier.enabled:
+            logger.warning("Monthly reminders skipped (email not configured or no admin API key)")
+            return
+
+        # Get all users from Immich
+        users = admin_immich_client.get_users()
+
+        year = now.year
+        month = now.month - 1 if now.month > 1 else 12
+        if month == 12:
+            year -= 1
+
+        sent_count = 0
+        for user in users:
+            user_id = user.get('id')
+            user_email = user.get('email')
+            user_name = user.get('name') or user_email.split('@')[0]
+
+            if not user_email:
+                continue
+
+            # Check user preferences
+            prefs = database.get_user_preferences(user_id)
+            preferences_dict = prefs.get('preferences', {}) if isinstance(prefs.get('preferences'), dict) else {}
+            email_prefs = preferences_dict.get('email_notifications', {})
+
+            # Only send if user has opted in
+            if not email_prefs.get('monthly_reminders', False):
+                continue
+
+            # Get photo count for last month
+            photos = database.get_photo_scores(user_id, year, month)
+            photo_count = len(photos)
+
+            if photo_count == 0:
+                continue
+
+            # ADMIN TODO: Replace 'localhost' with your actual curator URL
+            # This should match your Cloudflare Tunnel domain
+            # Example: "https://curator.yourdomain.com"
+            curator_url = app.state.immich_base_url.replace('2283', '8081')  # Temporary
+
+            # Send reminder
+            success = email_notifier.send_monthly_reminder(
+                user_email,
+                user_name,
+                year,
+                month,
+                photo_count,
+                curator_url
+            )
+
+            if success:
+                sent_count += 1
+
+        logger.info(f"Monthly reminders sent to {sent_count} users")
+
+    except Exception as e:
+        logger.error(f"Error sending monthly reminders: {e}")
 
 
 # Authentication check endpoint
@@ -498,6 +610,89 @@ async def get_statistics(user: Dict = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail="Database not initialized")
 
     return database.get_statistics()
+
+
+# User Preferences
+@app.get("/preferences", response_class=HTMLResponse)
+async def preferences_ui(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):
+    """Serve preferences UI"""
+    if not user:
+        immich_auth = app.state.immich_auth
+        login_url = immich_auth.login_redirect_url(request)
+        return RedirectResponse(url=login_url)
+
+    html_path = Path(__file__).parent.parent / "static" / "preferences.html"
+    if html_path.exists():
+        return html_path.read_text()
+
+    return HTMLResponse("<h1>Preferences not found</h1>", status_code=404)
+
+
+class UserPreferences(BaseModel):
+    """User preferences update"""
+    email_notifications: Dict[str, bool]
+    monthly_target: int
+    ui_suggestions: Dict[str, bool]
+
+
+@app.get("/api/preferences")
+async def get_preferences(user: Dict = Depends(get_current_user)):
+    """Get user preferences"""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    user_id = user['id']
+    prefs = database.get_user_preferences(user_id)
+
+    # Parse stored preferences
+    preferences_dict = prefs.get('preferences', {})
+    if isinstance(preferences_dict, str):
+        import json
+        preferences_dict = json.loads(preferences_dict)
+
+    return {
+        "user_id": user_id,
+        "email_notifications": preferences_dict.get('email_notifications', {
+            "monthly_reminders": False,
+            "quality_alerts": False,
+            "memory_lane": False,
+            "seasonal_automations": False,
+            "storage_warnings": True
+        }),
+        "monthly_target": prefs.get('monthly_target', 50),
+        "ui_suggestions": preferences_dict.get('ui_suggestions', {
+            "sharing_suggestions": False,
+            "event_detection": False,
+            "duplicate_warnings": True
+        })
+    }
+
+
+@app.put("/api/preferences")
+async def update_preferences(
+    preferences: UserPreferences,
+    user: Dict = Depends(get_current_user)
+):
+    """Update user preferences"""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    user_id = user['id']
+
+    # Save preferences to database
+    database.save_user_preferences(
+        user_id,
+        monthly_target=preferences.monthly_target,
+        preferences={
+            "email_notifications": preferences.email_notifications,
+            "ui_suggestions": preferences.ui_suggestions
+        }
+    )
+
+    return {
+        "status": "updated",
+        "message": "Preferences saved successfully"
+    }
 
 
 # Duplicate Management

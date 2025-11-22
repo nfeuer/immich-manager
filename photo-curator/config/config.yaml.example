@@ -30,9 +30,9 @@ scoring:
     aesthetic: 0.2
 
 curation:
-  monthly_target: 50  # Target photos per month
-  reminder_day: 1     # 1st of month
-  reminder_time: "09:00"
+  monthly_target: 50  # Target photos per month (default for new users)
+  reminder_day: 1     # 1st of month (fixed, not configurable)
+  reminder_time: "09:00"  # Time to send daily check for monthly reminders (HH:MM format)
 
 notifications:
   email:
