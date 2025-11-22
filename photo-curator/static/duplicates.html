@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duplicate Manager - Immich</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'immich-primary': '#4250af',
+                        'immich-bg': '#000000',
+                        'immich-gray': {
+                            50: '#f9fafb',
+                            100: '#f3f4f6',
+                            200: '#e5e7eb',
+                            300: '#d1d5db',
+                            400: '#9ca3af',
+                            500: '#6b7280',
+                            600: '#4b5563',
+                            700: '#374151',
+                            800: '#1f2937',
+                            900: '#111827',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-black dark:bg-immich-bg text-gray-900 dark:text-gray-100 min-h-screen">
+    <div class="max-w-[1920px] mx-auto">
+        <!-- Header -->
+        <header class="bg-white dark:bg-immich-gray-900 border-b border-gray-200 dark:border-immich-gray-800">
+            <div class="px-4 sm:px-6 lg:px-8 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-8 h-8 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5.97 4.06L14.09 6l1.41 1.41L16.91 6l1.06 1.06-1.41 1.41 1.41 1.42-1.06 1.06-1.41-1.41-1.42 1.41-1.06-1.06 1.41-1.42-1.41-1.41zM11.5 9.5L10 8l-1.5 1.5L7 8l-1.06 1.06L7.44 10.5l-1.5 1.44L7 13l1.5-1.5L10 13l1.06-1.06-1.5-1.44 1.5-1.44z"/>
+                        </svg>
+                        <div>
+                            <h1 class="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">Duplicate Manager</h1>
+                            <p class="text-sm text-gray-500 dark:text-immich-gray-400 hidden sm:block">Find and clean up duplicate photos</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="text-sm text-immich-primary hover:underline">← Back to Curator</a>
+                        <div class="text-right hidden sm:block">
+                            <p class="text-xs text-gray-500 dark:text-immich-gray-400">Logged in as</p>
+                            <p class="text-sm font-medium text-gray-900 dark:text-white" id="userName">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Controls -->
+        <div class="px-4 sm:px-6 lg:px-8 py-6">
+            <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-4 sm:p-6">
+                <div class="flex flex-wrap gap-4 items-end">
+                    <div class="flex-1 min-w-[120px]">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-immich-gray-300 mb-2">Year</label>
+                        <input type="number" id="yearInput" value="2024" min="2020" max="2030"
+                            class="w-full px-4 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none transition-all" />
+                    </div>
+                    <div class="flex-1 min-w-[160px]">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-immich-gray-300 mb-2">Month</label>
+                        <select id="monthSelect"
+                            class="w-full px-4 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none transition-all">
+                            <option value="1">January</option>
+                            <option value="2">February</option>
+                            <option value="3">March</option>
+                            <option value="4">April</option>
+                            <option value="5">May</option>
+                            <option value="6">June</option>
+                            <option value="7">July</option>
+                            <option value="8">August</option>
+                            <option value="9">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
+                    </div>
+                    <button onclick="scanDuplicates()"
+                        class="px-6 py-2 bg-immich-primary hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm hover:shadow-md">
+                        Scan for Duplicates
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="px-4 sm:px-6 lg:px-8 pb-8">
+            <div id="content">
+                <div class="text-center py-16 text-gray-500 dark:text-immich-gray-400">
+                    <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5.97 4.06L14.09 6l1.41 1.41L16.91 6l1.06 1.06-1.41 1.41 1.41 1.42-1.06 1.06-1.41-1.41-1.42 1.41-1.06-1.06 1.41-1.42-1.41-1.41zM11.5 9.5L10 8l-1.5 1.5L7 8l-1.06 1.06L7.44 10.5l-1.5 1.44L7 13l1.5-1.5L10 13l1.06-1.06-1.5-1.44 1.5-1.44z"/>
+                    </svg>
+                    <p class="text-lg">Select a month to scan for duplicate photos</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let currentYear = 2024;
+        let currentMonth = new Date().getMonth() + 1;
+        let duplicateGroups = [];
+        let photosData = {};
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async function() {
+            const now = new Date();
+            document.getElementById('yearInput').value = now.getFullYear();
+            document.getElementById('monthSelect').value = now.getMonth() + 1;
+
+            await checkAuth();
+        });
+
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/check');
+                const data = await response.json();
+
+                if (!data.authenticated) {
+                    window.location.href = data.login_url;
+                    return;
+                }
+
+                currentUser = data.user;
+                document.getElementById('userName').textContent = data.user.name || data.user.email;
+
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                alert('Authentication failed. Please login to Immich first.');
+            }
+        }
+
+        async function scanDuplicates() {
+            currentYear = parseInt(document.getElementById('yearInput').value);
+            currentMonth = parseInt(document.getElementById('monthSelect').value);
+
+            const content = document.getElementById('content');
+            content.innerHTML = `
+                <div class="text-center py-16">
+                    <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-immich-primary"></div>
+                    <p class="mt-4 text-gray-500 dark:text-immich-gray-400">Scanning for duplicates...</p>
+                </div>
+            `;
+
+            try {
+                const response = await fetch(`/api/photos/${currentYear}/${currentMonth}`);
+                const data = await response.json();
+
+                duplicateGroups = data.duplicates || [];
+                const photos = data.photos || [];
+
+                // Build photo data map
+                photosData = {};
+                photos.forEach(photo => {
+                    photosData[photo.asset_id] = photo;
+                });
+
+                renderDuplicates();
+
+            } catch (error) {
+                console.error('Error scanning duplicates:', error);
+                content.innerHTML = `
+                    <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 text-yellow-800 dark:text-yellow-200">
+                        <p class="font-medium">Error scanning for duplicates</p>
+                        <p class="text-sm mt-1">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderDuplicates() {
+            const content = document.getElementById('content');
+
+            if (duplicateGroups.length === 0) {
+                content.innerHTML = `
+                    <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-6 text-green-800 dark:text-green-200">
+                        <div class="flex items-center">
+                            <svg class="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div>
+                                <p class="font-medium text-lg">No duplicates found!</p>
+                                <p class="mt-1">All photos in ${getMonthName(currentMonth)} ${currentYear} are unique.</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            content.innerHTML = `
+                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
+                    <p class="font-medium text-blue-900 dark:text-blue-200">
+                        Found ${duplicateGroups.length} duplicate group${duplicateGroups.length > 1 ? 's' : ''}
+                        (${duplicateGroups.reduce((sum, g) => sum + g.length, 0)} total photos)
+                    </p>
+                    <p class="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                        Review each group and select which photos to keep or delete.
+                    </p>
+                </div>
+
+                <div id="duplicatesList" class="space-y-6"></div>
+            `;
+
+            const listEl = document.getElementById('duplicatesList');
+
+            duplicateGroups.forEach((group, groupIndex) => {
+                const groupEl = document.createElement('div');
+                groupEl.className = 'bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6';
+
+                groupEl.innerHTML = `
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                            Duplicate Group ${groupIndex + 1}
+                            <span class="text-sm font-normal text-gray-500 dark:text-immich-gray-400">(${group.length} photos)</span>
+                        </h3>
+                        <button onclick="keepBest(${groupIndex})"
+                            class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+                            Keep Best Quality
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                        ${group.map((assetId, photoIndex) => renderDuplicatePhoto(assetId, groupIndex, photoIndex)).join('')}
+                    </div>
+                `;
+
+                listEl.appendChild(groupEl);
+            });
+        }
+
+        function renderDuplicatePhoto(assetId, groupIndex, photoIndex) {
+            const photo = photosData[assetId];
+            if (!photo) return '';
+
+            const thumbnailUrl = photo.thumbnail_url || 'https://via.placeholder.com/300?text=No+Image';
+            const score = photo.score || 0;
+
+            return `
+                <div class="relative group">
+                    <div class="aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-immich-gray-800">
+                        <img class="w-full h-full object-cover"
+                             src="${thumbnailUrl}"
+                             alt="Photo"
+                             loading="lazy">
+                    </div>
+
+                    <!-- Info Overlay -->
+                    <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all rounded-lg flex items-center justify-center">
+                        <div class="opacity-0 group-hover:opacity-100 transition-opacity space-y-2">
+                            <button onclick="keepPhoto(${groupIndex}, ${photoIndex}, '${assetId}')"
+                                class="block w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg">
+                                Keep
+                            </button>
+                            <button onclick="deletePhoto(${groupIndex}, ${photoIndex}, '${assetId}')"
+                                class="block w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quality Badge -->
+                    <div class="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded-md">
+                        ⭐ ${(score * 100).toFixed(0)}
+                    </div>
+                </div>
+            `;
+        }
+
+        async function keepBest(groupIndex) {
+            const group = duplicateGroups[groupIndex];
+
+            // Find photo with highest score
+            let bestAssetId = group[0];
+            let bestScore = photosData[group[0]]?.score || 0;
+
+            group.forEach(assetId => {
+                const score = photosData[assetId]?.score || 0;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestAssetId = assetId;
+                }
+            });
+
+            const toDelete = group.filter(id => id !== bestAssetId);
+
+            if (!confirm(`Keep photo with score ${(bestScore * 100).toFixed(0)} and delete ${toDelete.length} duplicate${toDelete.length > 1 ? 's' : ''}?`)) {
+                return;
+            }
+
+            await deleteDuplicates(toDelete);
+
+            // Remove this group from display
+            duplicateGroups.splice(groupIndex, 1);
+            renderDuplicates();
+        }
+
+        async function keepPhoto(groupIndex, photoIndex, assetId) {
+            const group = duplicateGroups[groupIndex];
+            const toDelete = group.filter(id => id !== assetId);
+
+            if (!confirm(`Keep this photo and delete ${toDelete.length} duplicate${toDelete.length > 1 ? 's' : ''}?`)) {
+                return;
+            }
+
+            await deleteDuplicates(toDelete);
+
+            // Remove this group from display
+            duplicateGroups.splice(groupIndex, 1);
+            renderDuplicates();
+        }
+
+        async function deletePhoto(groupIndex, photoIndex, assetId) {
+            if (!confirm('Delete this photo? This action cannot be undone.')) {
+                return;
+            }
+
+            await deleteDuplicates([assetId]);
+
+            // Remove photo from group
+            duplicateGroups[groupIndex] = duplicateGroups[groupIndex].filter(id => id !== assetId);
+
+            // If only one photo left in group, remove the group
+            if (duplicateGroups[groupIndex].length <= 1) {
+                duplicateGroups.splice(groupIndex, 1);
+            }
+
+            renderDuplicates();
+        }
+
+        async function deleteDuplicates(assetIds) {
+            try {
+                const response = await fetch('/api/duplicates/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ asset_ids: assetIds })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete photos');
+                }
+
+                const data = await response.json();
+                console.log(`Deleted ${data.deleted} photos`);
+
+            } catch (error) {
+                console.error('Error deleting duplicates:', error);
+                alert('Error deleting photos: ' + error.message);
+            }
+        }
+
+        function getMonthName(month) {
+            const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December'];
+            return months[month - 1];
+        }
+    </script>
+</body>
+</html>

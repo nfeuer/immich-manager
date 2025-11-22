@@ -161,6 +161,15 @@ class Database:
 
             return [dict(row) for row in cursor.fetchall()]
 
+    def delete_photo_score(self, asset_id: str):
+        """Delete a photo score by asset ID"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM photo_scores
+                WHERE asset_id = ?
+            """, (asset_id,))
+
     def get_top_photos(self, user_id: str, year: int, month: int, limit: int = 50) -> List[Dict]:
         """Get top N photos by score"""
         with self._get_connection() as conn:

@@ -500,6 +500,70 @@ async def get_statistics(user: Dict = Depends(get_current_user)):
     return database.get_statistics()
 
 
+# Duplicate Management
+@app.get("/duplicates", response_class=HTMLResponse)
+async def duplicates_ui(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):
+    """Serve duplicate manager UI"""
+    if not user:
+        immich_auth = app.state.immich_auth
+        login_url = immich_auth.login_redirect_url(request)
+        return RedirectResponse(url=login_url)
+
+    html_path = Path(__file__).parent.parent / "static" / "duplicates.html"
+    if html_path.exists():
+        return html_path.read_text()
+
+    return HTMLResponse("<h1>Duplicate Manager not found</h1>", status_code=404)
+
+
+class DuplicateDelete(BaseModel):
+    """Duplicate deletion request"""
+    asset_ids: List[str]
+
+
+@app.post("/api/duplicates/delete")
+async def delete_duplicates(
+    delete_request: DuplicateDelete,
+    user: Dict = Depends(get_current_user)
+):
+    """Delete duplicate photos from Immich (user must own the assets)"""
+    try:
+        # Create user-specific API client
+        user_client = ImmichClient(app.state.immich_api_url, user['access_token'])
+
+        deleted_count = 0
+        failed_count = 0
+
+        for asset_id in delete_request.asset_ids:
+            try:
+                # Delete from Immich
+                response = user_client.session.delete(
+                    f"{user_client.api_url}/assets",
+                    json={"ids": [asset_id]}
+                )
+                response.raise_for_status()
+                deleted_count += 1
+
+                # Remove from database
+                if database:
+                    database.delete_photo_score(asset_id)
+
+            except Exception as e:
+                logger.error(f"Failed to delete asset {asset_id}: {e}")
+                failed_count += 1
+
+        return {
+            "status": "completed",
+            "deleted": deleted_count,
+            "failed": failed_count,
+            "total": len(delete_request.asset_ids)
+        }
+
+    except Exception as e:
+        logger.error(f"Error deleting duplicates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def main():
     """Run the server"""
     try:
