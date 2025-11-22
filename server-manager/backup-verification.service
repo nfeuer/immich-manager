@@ -1,0 +1,25 @@
+[Unit]
+Description=Immich Backup Verification Service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/immich-manager/server-manager
+
+# ADMIN TODO: Update path to match your installation directory
+ExecStart=/usr/bin/python3 -c "from src.backup_verifier import BackupVerifier; import yaml; \
+config = yaml.safe_load(open('config/config.yaml')); \
+verifier = BackupVerifier(config.get('backup_verification', {})); \
+result = verifier.run_monthly_verification(); \
+print('Verification:', result['status']); \
+exit(0 if result['status'] == 'success' else 1)"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=backup-verification
+
+[Install]
+WantedBy=multi-user.target

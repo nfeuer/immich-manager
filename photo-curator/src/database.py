@@ -391,6 +391,16 @@ class Database:
                 json.dumps(preferences.get('preferences', {}))
             ))
 
+    def save_user_preferences(self, user_id: str, monthly_target: int, preferences: Dict):
+        """Save user preferences"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO user_preferences (
+                    user_id, monthly_target, preferences
+                ) VALUES (?, ?, ?)
+            """, (user_id, monthly_target, json.dumps(preferences)))
+
     def get_statistics(self) -> Dict[str, Any]:
         """Get overall statistics"""
         with self._get_connection() as conn:
@@ -415,3 +425,86 @@ class Database:
             stats['photos_with_faces'] = cursor.fetchone()['count']
 
             return stats
+
+    def get_analytics_data(self, period_days: int = 30) -> Dict[str, Any]:
+        """Get comprehensive analytics data for admin dashboard"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            analytics = {}
+
+            # Total unique users
+            cursor.execute("SELECT COUNT(DISTINCT user_id) as count FROM photo_scores")
+            analytics['total_users'] = cursor.fetchone()['count']
+
+            # Total photos curated (completed sessions)
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM curation_sessions
+                WHERE completed = 1
+            """)
+            analytics['photos_curated'] = cursor.fetchone()['count']
+
+            # Total albums created (same as completed sessions)
+            analytics['albums_created'] = analytics['photos_curated']
+
+            # Average quality score
+            cursor.execute("SELECT AVG(score) as avg FROM photo_scores")
+            avg_score = cursor.fetchone()['avg']
+            analytics['avg_quality'] = round(avg_score, 2) if avg_score else 0
+
+            # Upload trend (photos per month for last 12 months)
+            cursor.execute("""
+                SELECT
+                    year || '-' || printf('%02d', month) as month_label,
+                    COUNT(*) as count
+                FROM photo_scores
+                WHERE analyzed_at >= date('now', '-12 months')
+                GROUP BY year, month
+                ORDER BY year, month
+            """)
+            analytics['upload_trend'] = [
+                {'month': row['month_label'], 'count': row['count']}
+                for row in cursor.fetchall()
+            ]
+
+            # User activity (photos per user)
+            cursor.execute("""
+                SELECT
+                    user_id,
+                    COUNT(*) as photo_count
+                FROM photo_scores
+                GROUP BY user_id
+                ORDER BY photo_count DESC
+            """)
+            analytics['user_activity'] = [
+                {'user_id': row['user_id'], 'count': row['photo_count']}
+                for row in cursor.fetchall()
+            ]
+
+            # Detailed user statistics
+            cursor.execute("""
+                SELECT
+                    ps.user_id,
+                    COUNT(DISTINCT ps.id) as total_photos,
+                    AVG(ps.score) as avg_score,
+                    COUNT(DISTINCT cs.id) as albums_created,
+                    MAX(ps.analyzed_at) as last_active
+                FROM photo_scores ps
+                LEFT JOIN curation_sessions cs ON
+                    ps.user_id = cs.user_id AND cs.completed = 1
+                GROUP BY ps.user_id
+                ORDER BY total_photos DESC
+            """)
+            analytics['user_stats'] = [
+                {
+                    'user_id': row['user_id'],
+                    'total_photos': row['total_photos'],
+                    'avg_score': round(row['avg_score'], 2) if row['avg_score'] else 0,
+                    'albums_created': row['albums_created'],
+                    'last_active': row['last_active']
+                }
+                for row in cursor.fetchall()
+            ]
+
+            return analytics

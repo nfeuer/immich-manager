@@ -30,6 +30,43 @@ backup:
     enabled: false
     public_key: ""
 
+# Backup Verification System (Feature #12)
+backup_verification:
+  # Directory where backups are stored (same as backup.local_path)
+  backup_dir: "/mnt/backups/immich"
+
+  # Temporary directory for restore testing
+  test_restore_dir: "/tmp/immich-restore-test"
+
+  # Verification log location
+  verification_log: "data/backup-verification.json"
+
+  # Email notifications for verification failures
+  email_notifications:
+    enabled: true  # Send email if verification fails
+
+  # Offsite sync (S3 or Backblaze B2)
+  offsite_sync:
+    enabled: false  # Set to true after configuring
+    type: "s3"  # "s3" or "backblaze"
+
+    # For AWS S3:
+    bucket: "my-immich-backups"
+    region: "us-east-1"
+    access_key: ""  # AWS Access Key ID
+    secret_key: ""  # AWS Secret Access Key
+
+    # For Backblaze B2 (uncomment if using):
+    # bucket: "my-immich-backups"
+    # key_id: ""  # Backblaze Key ID
+    # application_key: ""  # Backblaze Application Key
+
+  # Retention policy (advanced backup management)
+  retention_policy:
+    daily: 7      # Keep 7 daily backups
+    weekly: 4     # Keep 4 weekly backups (one per week)
+    monthly: 12   # Keep 12 monthly backups (one per month)
+
 monitoring:
   disk_check_interval: 300  # 5 minutes
   metrics_interval: 60      # 1 minute

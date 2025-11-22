@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics - Immich Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'immich-primary': '#4250af',
+                        'immich-bg': '#000000',
+                        'immich-gray': {
+                            50: '#f9fafb',
+                            100: '#f3f4f6',
+                            200: '#e5e7eb',
+                            300: '#d1d5db',
+                            400: '#9ca3af',
+                            500: '#6b7280',
+                            600: '#4b5563',
+                            700: '#374151',
+                            800: '#1f2937',
+                            900: '#111827',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-black dark:bg-immich-bg text-gray-900 dark:text-gray-100 min-h-screen">
+    <div class="max-w-[1920px] mx-auto">
+        <!-- Header -->
+        <header class="bg-white dark:bg-immich-gray-900 border-b border-gray-200 dark:border-immich-gray-800">
+            <div class="px-4 sm:px-6 lg:px-8 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-8 h-8 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+                        </svg>
+                        <div>
+                            <h1 class="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">Analytics Dashboard</h1>
+                            <p class="text-sm text-gray-500 dark:text-immich-gray-400 hidden sm:block">System usage and user insights</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="text-sm text-immich-primary hover:underline">← Back to Curator</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Content -->
+        <div class="px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Time Period Selector -->
+            <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-4 mb-6">
+                <div class="flex items-center gap-4">
+                    <label class="text-sm font-medium text-gray-700 dark:text-immich-gray-300">Time Period:</label>
+                    <select id="timePeriod" onchange="loadAnalytics()"
+                        class="px-4 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none">
+                        <option value="7">Last 7 Days</option>
+                        <option value="30" selected>Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                        <option value="365">Last Year</option>
+                    </select>
+                    <button onclick="loadAnalytics()" class="px-4 py-2 bg-immich-primary hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Key Metrics -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white dark:bg-immich-gray-900 rounded-lg shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Total Users</p>
+                            <p class="text-3xl font-bold text-gray-900 dark:text-white mt-2" id="totalUsers">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-immich-primary opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-immich-gray-900 rounded-lg shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Photos Curated</p>
+                            <p class="text-3xl font-bold text-gray-900 dark:text-white mt-2" id="photosCurated">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-green-500 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-immich-gray-900 rounded-lg shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Albums Created</p>
+                            <p class="text-3xl font-bold text-gray-900 dark:text-white mt-2" id="albumsCreated">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-purple-500 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-immich-gray-900 rounded-lg shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Avg Quality</p>
+                            <p class="text-3xl font-bold text-gray-900 dark:text-white mt-2" id="avgQuality">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-yellow-500 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <!-- Upload Trend Chart -->
+                <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Upload Activity</h3>
+                    <canvas id="uploadChart"></canvas>
+                </div>
+
+                <!-- User Activity Chart -->
+                <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">User Activity</h3>
+                    <canvas id="userActivityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- User Table -->
+            <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-6">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">User Statistics</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead class="border-b border-gray-200 dark:border-immich-gray-800">
+                            <tr>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">User</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Photos Uploaded</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Albums</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Storage Used</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 dark:text-immich-gray-400 uppercase">Last Active</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userTableBody" class="divide-y divide-gray-200 dark:divide-immich-gray-800">
+                            <tr>
+                                <td colspan="5" class="text-center py-8 text-gray-500 dark:text-immich-gray-400">
+                                    Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let uploadChart = null;
+        let userActivityChart = null;
+
+        async function loadAnalytics() {
+            const period = document.getElementById('timePeriod').value;
+
+            try {
+                const response = await fetch(`/api/analytics?period=${period}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const apiData = await response.json();
+
+                // Transform API data to match UI expectations
+                const data = {
+                    totalUsers: apiData.total_users || 0,
+                    photosCurated: apiData.photos_curated || 0,
+                    albumsCreated: apiData.albums_created || 0,
+                    avgQuality: (apiData.avg_quality || 0) / 10, // Convert 0-10 to 0-1
+                    uploadTrend: (apiData.upload_trend || []).map(d => ({
+                        date: d.month,
+                        count: d.count
+                    })),
+                    userActivity: (apiData.user_activity || []).map(u => ({
+                        user: u.label || u.user_id,
+                        curated: u.count
+                    })),
+                    users: (apiData.user_stats || []).map(u => ({
+                        name: u.user_name || 'Unknown',
+                        email: u.user_email || 'Unknown',
+                        photos: u.total_photos || 0,
+                        albums: u.albums_created || 0,
+                        storage: 'N/A', // Storage not tracked yet
+                        lastActive: u.last_active ? formatDate(u.last_active) : 'Never'
+                    }))
+                };
+
+                updateMetrics(data);
+                updateCharts(data);
+                updateUserTable(data);
+
+            } catch (error) {
+                console.error('Error loading analytics:', error);
+                // Show error message to user
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-600 text-red-700 dark:text-red-200 px-4 py-3 rounded-lg mb-4';
+                errorDiv.innerHTML = `<strong>Error:</strong> Failed to load analytics data. ${error.message}`;
+                document.querySelector('.px-4.sm\\:px-6.lg\\:px-8.py-8').prepend(errorDiv);
+            }
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'Never';
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 60) return `${diffMins} min ago`;
+            if (diffHours < 24) return `${diffHours} hours ago`;
+            if (diffDays < 7) return `${diffDays} days ago`;
+            return date.toLocaleDateString();
+        }
+
+        function updateMetrics(data) {
+            document.getElementById('totalUsers').textContent = data.totalUsers;
+            document.getElementById('photosCurated').textContent = data.photosCurated.toLocaleString();
+            document.getElementById('albumsCreated').textContent = data.albumsCreated;
+            document.getElementById('avgQuality').textContent = (data.avgQuality * 100).toFixed(0) + '%';
+        }
+
+        function updateCharts(data) {
+            const isDark = document.documentElement.classList.contains('dark');
+            const textColor = isDark ? '#9ca3af' : '#6b7280';
+            const gridColor = isDark ? '#374151' : '#e5e7eb';
+
+            // Upload Trend Chart
+            if (uploadChart) uploadChart.destroy();
+
+            const uploadCtx = document.getElementById('uploadChart').getContext('2d');
+            uploadChart = new Chart(uploadCtx, {
+                type: 'line',
+                data: {
+                    labels: data.uploadTrend.map(d => d.date),
+                    datasets: [{
+                        label: 'Photos Uploaded',
+                        data: data.uploadTrend.map(d => d.count),
+                        borderColor: '#4250af',
+                        backgroundColor: 'rgba(66, 80, 175, 0.1)',
+                        tension: 0.3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: textColor },
+                            grid: { color: gridColor }
+                        },
+                        y: {
+                            ticks: { color: textColor },
+                            grid: { color: gridColor }
+                        }
+                    }
+                }
+            });
+
+            // User Activity Chart
+            if (userActivityChart) userActivityChart.destroy();
+
+            const userCtx = document.getElementById('userActivityChart').getContext('2d');
+            userActivityChart = new Chart(userCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.userActivity.map(u => u.user),
+                    datasets: [{
+                        label: 'Photos Curated',
+                        data: data.userActivity.map(u => u.curated),
+                        backgroundColor: '#4250af'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: textColor },
+                            grid: { color: gridColor }
+                        },
+                        y: {
+                            ticks: { color: textColor },
+                            grid: { color: gridColor }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateUserTable(data) {
+            const tbody = document.getElementById('userTableBody');
+            tbody.innerHTML = data.users.map(user => `
+                <tr class="hover:bg-gray-50 dark:hover:bg-immich-gray-800">
+                    <td class="py-3 px-4">
+                        <div class="font-medium text-gray-900 dark:text-white">${user.name}</div>
+                        <div class="text-sm text-gray-500 dark:text-immich-gray-400">${user.email}</div>
+                    </td>
+                    <td class="py-3 px-4 text-gray-900 dark:text-white">${user.photos.toLocaleString()}</td>
+                    <td class="py-3 px-4 text-gray-900 dark:text-white">${user.albums}</td>
+                    <td class="py-3 px-4 text-gray-900 dark:text-white">${user.storage}</td>
+                    <td class="py-3 px-4 text-gray-500 dark:text-immich-gray-400">${user.lastActive}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Load on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAnalytics();
+        });
+    </script>
+</body>
+</html>

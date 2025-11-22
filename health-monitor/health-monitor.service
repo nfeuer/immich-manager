@@ -1,0 +1,17 @@
+[Unit]
+Description=Immich Manager Health Monitor
+After=network.target
+
+[Service]
+Type=oneshot
+User=immich
+WorkingDirectory=/opt/immich-manager
+ExecStart=/usr/bin/python3 /opt/immich-manager/health-monitor/src/main.py
+
+# TODO: Update paths to match your installation
+# User: Change to user running Immich
+# WorkingDirectory: Change to your install location
+# ExecStart: Update python path if using venv
+
+[Install]
+WantedBy=multi-user.target

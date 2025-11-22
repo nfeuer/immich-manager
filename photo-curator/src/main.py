@@ -695,6 +695,65 @@ async def update_preferences(
     }
 
 
+# Analytics Dashboard (Admin)
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics_ui(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):
+    """Serve analytics dashboard (accessible to all authenticated users)"""
+    if not user:
+        immich_auth = app.state.immich_auth
+        login_url = immich_auth.login_redirect_url(request)
+        return RedirectResponse(url=login_url)
+
+    html_path = Path(__file__).parent.parent / "static" / "analytics.html"
+    if html_path.exists():
+        return html_path.read_text()
+
+    return HTMLResponse("<h1>Analytics Dashboard not found</h1>", status_code=404)
+
+
+@app.get("/api/analytics")
+async def get_analytics(period: int = 30, user: Dict = Depends(get_current_user)):
+    """Get analytics data (accessible to all authenticated users)"""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    try:
+        analytics = database.get_analytics_data(period_days=period)
+
+        # If admin API client available, enrich with user names
+        if admin_immich_client:
+            try:
+                users = admin_immich_client.get_users()
+                user_map = {u['id']: u for u in users}
+
+                # Add user names to stats
+                for stat in analytics.get('user_stats', []):
+                    user_data = user_map.get(stat['user_id'])
+                    if user_data:
+                        stat['user_name'] = user_data.get('name') or user_data.get('email', 'Unknown')
+                        stat['user_email'] = user_data.get('email', 'Unknown')
+                    else:
+                        stat['user_name'] = stat['user_id'][:8] + '...'
+                        stat['user_email'] = 'Unknown'
+
+                # Add user labels to activity data
+                for activity in analytics.get('user_activity', []):
+                    user_data = user_map.get(activity['user_id'])
+                    if user_data:
+                        activity['label'] = user_data.get('name') or user_data.get('email', 'Unknown')
+                    else:
+                        activity['label'] = activity['user_id'][:8] + '...'
+
+            except Exception as e:
+                logger.warning(f"Could not enrich analytics with user data: {e}")
+
+        return analytics
+
+    except Exception as e:
+        logger.error(f"Error getting analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Duplicate Management
 @app.get("/duplicates", response_class=HTMLResponse)
 async def duplicates_ui(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):

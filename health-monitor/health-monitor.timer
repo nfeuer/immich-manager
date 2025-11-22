@@ -1,0 +1,16 @@
+[Unit]
+Description=Run Immich Manager Health Monitor every 15 minutes
+Requires=health-monitor.service
+
+[Timer]
+# Run every 15 minutes
+OnCalendar=*:0/15
+
+# Run 1 minute after boot
+OnBootSec=1min
+
+# If missed (system was off), run immediately on next boot
+Persistent=true
+
+[Install]
+WantedBy=timers.target

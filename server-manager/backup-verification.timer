@@ -1,0 +1,17 @@
+[Unit]
+Description=Run Immich Backup Verification Monthly
+Requires=backup-verification.service
+
+[Timer]
+# Run on the 1st of every month at 3 AM
+OnCalendar=monthly
+OnCalendar=*-*-01 03:00:00
+
+# Run 10 minutes after boot (for testing)
+OnBootSec=10min
+
+# If system was off when timer should have run, run it immediately
+Persistent=true
+
+[Install]
+WantedBy=timers.target
