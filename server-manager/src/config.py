@@ -3,6 +3,7 @@ Configuration management for Immich Server Manager
 """
 
 import os
+import re
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -105,9 +106,37 @@ class Config(BaseModel):
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
 
 
+_ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')
+
+
+def _resolve_env_vars(obj):
+    """
+    Recursively resolve ${ENV_VAR} and ${ENV_VAR:-default} references in
+    config values.  This lets users keep secrets out of config files, e.g.:
+        smtp_password: "${SMTP_PASSWORD}"
+        api_key: "${IMMICH_API_KEY:-}"
+    """
+    if isinstance(obj, str):
+        def _replace(match):
+            expr = match.group(1)
+            if ':-' in expr:
+                var_name, default = expr.split(':-', 1)
+            else:
+                var_name, default = expr, ''
+            return os.environ.get(var_name.strip(), default)
+        return _ENV_VAR_PATTERN.sub(_replace, obj)
+    elif isinstance(obj, dict):
+        return {k: _resolve_env_vars(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_resolve_env_vars(item) for item in obj]
+    return obj
+
+
 def load_config(config_path: Optional[str] = None) -> Config:
     """
-    Load configuration from YAML file
+    Load configuration from YAML file.
+
+    Supports ${ENV_VAR} and ${ENV_VAR:-default} syntax for secret values.
 
     Args:
         config_path: Path to config file, defaults to config/config.yaml
@@ -139,6 +168,8 @@ def load_config(config_path: Optional[str] = None) -> Config:
 
     with open(config_path, 'r') as f:
         config_data = yaml.safe_load(f)
+
+    config_data = _resolve_env_vars(config_data)
 
     return Config(**config_data)
 

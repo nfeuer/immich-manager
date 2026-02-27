@@ -58,6 +58,24 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to every response."""
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
 async def require_auth(request: Request) -> Dict[str, Any]:
     """
     Dependency that validates the request against Immich's auth system.

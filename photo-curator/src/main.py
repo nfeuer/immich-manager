@@ -10,10 +10,12 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+import os
 import uvicorn
 import yaml
 import logging
 import asyncio
+import re
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import Database
@@ -46,6 +48,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to every response."""
+    response = await call_next(request)
+    # Photo curator uses Tailwind CDN and Chart.js CDN in some pages
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "font-src 'self' https://cdn.jsdelivr.net; "
+        "frame-ancestors 'none'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
 # Global state
 config: Optional[Dict] = None
 database: Optional[Database] = None
@@ -54,6 +77,26 @@ photo_cache: Optional[PhotoCache] = None
 analyzer: Optional[PhotoAnalyzer] = None
 scheduler: Optional[AsyncIOScheduler] = None
 email_notifier: Optional[EmailNotifier] = None
+
+_ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')
+
+
+def _resolve_env_vars(obj):
+    """Recursively resolve ${ENV_VAR} and ${ENV_VAR:-default} in config values."""
+    if isinstance(obj, str):
+        def _replace(match):
+            expr = match.group(1)
+            if ':-' in expr:
+                var_name, default = expr.split(':-', 1)
+            else:
+                var_name, default = expr, ''
+            return os.environ.get(var_name.strip(), default)
+        return _ENV_VAR_PATTERN.sub(_replace, obj)
+    elif isinstance(obj, dict):
+        return {k: _resolve_env_vars(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_resolve_env_vars(item) for item in obj]
+    return obj
 
 
 # Request models
@@ -81,7 +124,7 @@ async def startup_event():
         config_path = Path("config/config.yaml")
         if config_path.exists():
             with open(config_path) as f:
-                config = yaml.safe_load(f)
+                config = _resolve_env_vars(yaml.safe_load(f))
         else:
             logger.warning("No config file found, using defaults")
             config = {
