@@ -10,10 +10,12 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+import os
 import uvicorn
 import yaml
 import logging
 import asyncio
+import re
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import Database
@@ -32,14 +34,40 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Enable CORS
+# CORS - restrict to known origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+        "http://localhost:2283",
+        "http://127.0.0.1:2283",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to every response."""
+    response = await call_next(request)
+    # Photo curator uses Tailwind CDN and Chart.js CDN in some pages
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "font-src 'self' https://cdn.jsdelivr.net; "
+        "frame-ancestors 'none'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
 
 # Global state
 config: Optional[Dict] = None
@@ -49,6 +77,26 @@ photo_cache: Optional[PhotoCache] = None
 analyzer: Optional[PhotoAnalyzer] = None
 scheduler: Optional[AsyncIOScheduler] = None
 email_notifier: Optional[EmailNotifier] = None
+
+_ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')
+
+
+def _resolve_env_vars(obj):
+    """Recursively resolve ${ENV_VAR} and ${ENV_VAR:-default} in config values."""
+    if isinstance(obj, str):
+        def _replace(match):
+            expr = match.group(1)
+            if ':-' in expr:
+                var_name, default = expr.split(':-', 1)
+            else:
+                var_name, default = expr, ''
+            return os.environ.get(var_name.strip(), default)
+        return _ENV_VAR_PATTERN.sub(_replace, obj)
+    elif isinstance(obj, dict):
+        return {k: _resolve_env_vars(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_resolve_env_vars(item) for item in obj]
+    return obj
 
 
 # Request models
@@ -76,7 +124,7 @@ async def startup_event():
         config_path = Path("config/config.yaml")
         if config_path.exists():
             with open(config_path) as f:
-                config = yaml.safe_load(f)
+                config = _resolve_env_vars(yaml.safe_load(f))
         else:
             logger.warning("No config file found, using defaults")
             config = {
@@ -346,6 +394,28 @@ async def root(request: Request, user: Optional[Dict] = Depends(get_current_user
 async def health_check():
     """Health check endpoint (no auth required)"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/thumbnail/{asset_id}")
+async def proxy_thumbnail(asset_id: str, user: Dict = Depends(get_current_user)):
+    """Proxy thumbnail requests so user tokens are never exposed in URLs."""
+    from fastapi.responses import Response
+    import requests as http_requests
+
+    try:
+        resp = http_requests.get(
+            f"{app.state.immich_api_url}/assets/{asset_id}/thumbnail",
+            headers={"Authorization": f"Bearer {user['access_token']}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return Response(
+            content=resp.content,
+            media_type=resp.headers.get("content-type", "image/jpeg"),
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
 
 
 @app.get("/api/status")

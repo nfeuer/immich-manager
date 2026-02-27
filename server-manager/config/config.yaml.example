@@ -1,7 +1,7 @@
 # Immich Server Manager Configuration
 
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"  # Use "0.0.0.0" only if you need LAN access and have a reverse proxy/firewall
   port: 8080
   workers: 2
   log_level: "INFO"
@@ -9,7 +9,7 @@ server:
 immich:
   docker_compose_path: "/opt/immich"
   api_url: "http://localhost:2283/api"
-  api_key: ""  # Generate in Immich: Admin → API Keys
+  api_key: "${IMMICH_API_KEY:-}"  # Generate in Immich: Admin → API Keys. Use env var or paste directly.
 
 storage:
   mergerfs_mount: "/mnt/storage"
@@ -53,13 +53,13 @@ backup_verification:
     # For AWS S3:
     bucket: "my-immich-backups"
     region: "us-east-1"
-    access_key: ""  # AWS Access Key ID
-    secret_key: ""  # AWS Secret Access Key
+    access_key: "${AWS_ACCESS_KEY_ID:-}"
+    secret_key: "${AWS_SECRET_ACCESS_KEY:-}"
 
     # For Backblaze B2 (uncomment if using):
     # bucket: "my-immich-backups"
-    # key_id: ""  # Backblaze Key ID
-    # application_key: ""  # Backblaze Application Key
+    # key_id: "${B2_KEY_ID:-}"
+    # application_key: "${B2_APPLICATION_KEY:-}"
 
   # Retention policy (advanced backup management)
   retention_policy:
@@ -82,8 +82,8 @@ alerts:
     enabled: true
     smtp_host: "smtp.gmail.com"
     smtp_port: 587
-    smtp_user: "your-email@gmail.com"
-    smtp_password: "your-app-password"
+    smtp_user: "${SMTP_USER:-your-email@gmail.com}"
+    smtp_password: "${SMTP_PASSWORD}"  # Use env var: export SMTP_PASSWORD='your-app-password'
     from: "immich-server@yourdomain.com"
     to:
       - "admin@yourdomain.com"
