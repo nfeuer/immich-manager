@@ -265,12 +265,18 @@
                 renderUI();
             } catch (error) {
                 console.error('Error loading photos:', error);
-                content.innerHTML = `
-                    <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 text-yellow-800 dark:text-yellow-200">
-                        <p class="font-medium">Error loading photos</p>
-                        <p class="text-sm mt-1">${error.message}</p>
-                    </div>
-                `;
+                content.textContent = '';
+                const errDiv = document.createElement('div');
+                errDiv.className = 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 text-yellow-800 dark:text-yellow-200';
+                const p1 = document.createElement('p');
+                p1.className = 'font-medium';
+                p1.textContent = 'Error loading photos';
+                const p2 = document.createElement('p');
+                p2.className = 'text-sm mt-1';
+                p2.textContent = 'Please check your connection and try again.';
+                errDiv.appendChild(p1);
+                errDiv.appendChild(p2);
+                content.appendChild(errDiv);
             }
         }
 
@@ -290,7 +296,7 @@
                 const data = await response.json();
                 alert(`Analysis started! Refresh in a few minutes to see results.`);
             } catch (error) {
-                alert('Error starting analysis: ' + error.message);
+                window.alert('Error starting analysis. Please check your connection.');
             }
         }
 
@@ -354,6 +360,11 @@
             renderUI();
         }
 
+        // Escape string for safe HTML attribute embedding
+        function escAttr(str) {
+            return String(str ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
         function renderPhotos() {
             const grid = document.getElementById('photoGrid');
             if (!grid) return;
@@ -365,16 +376,20 @@
             grid.innerHTML = photosToShow.map(photo => {
                 const isSelected = selectedPhotos.has(photo.asset_id);
                 const isAISuggested = aiSuggested.includes(photo.asset_id);
-                const thumbnailUrl = photo.thumbnail_url || 'https://via.placeholder.com/300?text=No+Image';
+                const rawUrl = photo.thumbnail_url || '';
+                // Only allow relative paths and http(s) URLs
+                const thumbnailUrl = (rawUrl.startsWith('/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))
+                    ? escAttr(rawUrl) : '';
+                const safeId = escAttr(photo.asset_id);
+                const score = Number(photo.score) || 0;
 
                 return `
                     <div class="photo-card relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-gray-100 dark:bg-immich-gray-800 group ${isSelected ? 'ring-4 ring-immich-primary ring-offset-2 dark:ring-offset-immich-bg' : ''} ${isAISuggested ? 'ring-2 ring-green-500' : ''}"
-                         onclick="togglePhoto('${photo.asset_id}')">
+                         onclick="togglePhoto('${safeId}')">
                         <img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                              src="${thumbnailUrl}"
                              alt="Photo"
-                             loading="lazy"
-                             onerror="this.src='https://via.placeholder.com/300?text=Error'">
+                             loading="lazy">
 
                         <!-- Overlay on hover -->
                         <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 flex items-center justify-center">
@@ -384,7 +399,7 @@
                         <!-- Badges -->
                         ${isAISuggested ? '<div class="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg">AI</div>' : ''}
                         <div class="absolute bottom-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded-md">
-                            ⭐ ${(photo.score * 100).toFixed(0)}
+                            ⭐ ${(score * 100).toFixed(0)}
                         </div>
                     </div>
                 `;

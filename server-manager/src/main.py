@@ -2,7 +2,7 @@
 Main FastAPI application for Immich Server Manager
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,15 +10,19 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import uvicorn
 import asyncio
+import requests as http_requests
+import logging
 
 from .config import load_config, Config
 from .database import Database
 from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
 from .backup import BackupManager
 from .alerts import AlertManager
+
+logger = logging.getLogger(__name__)
 
 
 app = FastAPI(
@@ -27,14 +31,76 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Enable CORS
+
+# --- Authentication ---
+
+def _get_allowed_origins() -> List[str]:
+    """Build allowed origins from config at startup."""
+    try:
+        cfg = load_config()
+        immich_url = cfg.immich.api_url.rsplit("/api", 1)[0]  # e.g. http://localhost:2283
+        origins = [
+            f"http://localhost:{cfg.server.port}",
+            f"http://127.0.0.1:{cfg.server.port}",
+            immich_url,
+        ]
+        return origins
+    except Exception:
+        return ["http://localhost:8080", "http://127.0.0.1:8080"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def require_auth(request: Request) -> Dict[str, Any]:
+    """
+    Dependency that validates the request against Immich's auth system.
+    Accepts either:
+      - Cookie: immich_access_token
+      - Header: Authorization: Bearer <token>
+    """
+    access_token = request.cookies.get("immich_access_token")
+    if not access_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
+
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Validate with Immich
+    immich_api_url = getattr(request.app.state, "immich_api_url", None)
+    if not immich_api_url:
+        raise HTTPException(status_code=503, detail="Immich API URL not configured")
+
+    try:
+        resp = http_requests.get(
+            f"{immich_api_url}/auth/validateToken",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        user_resp = http_requests.get(
+            f"{immich_api_url}/users/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=5,
+        )
+        if user_resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Could not fetch user info")
+
+        return user_resp.json()
+
+    except http_requests.RequestException as e:
+        logger.error(f"Auth validation error: {e}")
+        raise HTTPException(status_code=502, detail="Could not reach Immich for auth validation")
 
 # Global state
 config: Optional[Config] = None
@@ -71,6 +137,9 @@ async def startup_event():
 
         # Initialize alert manager
         alert_manager = AlertManager(config.alerts)
+
+        # Store Immich API URL for auth validation
+        app.state.immich_api_url = config.immich.api_url
 
         # Initialize scheduler
         scheduler = AsyncIOScheduler()
@@ -275,7 +344,7 @@ async def health_check():
 
 
 @app.get("/api/status")
-async def get_status():
+async def get_status(user: Dict = Depends(require_auth)):
     """Get overall system status"""
     if not system_monitor or not docker_monitor:
         raise HTTPException(status_code=503, detail="Monitors not initialized")
@@ -289,7 +358,7 @@ async def get_status():
 
 
 @app.get("/api/disks")
-async def get_disk_health():
+async def get_disk_health(user: Dict = Depends(require_auth)):
     """Get current disk health"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -301,7 +370,7 @@ async def get_disk_health():
 
 
 @app.get("/api/metrics")
-async def get_metrics(hours: int = 24):
+async def get_metrics(hours: int = 24, user: Dict = Depends(require_auth)):
     """Get system metrics for time range"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -313,7 +382,7 @@ async def get_metrics(hours: int = 24):
 
 
 @app.get("/api/backups")
-async def get_backups():
+async def get_backups(user: Dict = Depends(require_auth)):
     """Get backup history"""
     if not database or not backup_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
@@ -325,7 +394,7 @@ async def get_backups():
 
 
 @app.post("/api/backup/now")
-async def trigger_backup(background_tasks: BackgroundTasks):
+async def trigger_backup(background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
     """Trigger immediate backup"""
     if not backup_manager:
         raise HTTPException(status_code=503, detail="Backup manager not initialized")
@@ -339,7 +408,7 @@ async def trigger_backup(background_tasks: BackgroundTasks):
 
 
 @app.get("/api/alerts")
-async def get_alerts(acknowledged: bool = False):
+async def get_alerts(acknowledged: bool = False, user: Dict = Depends(require_auth)):
     """Get alerts"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -350,7 +419,7 @@ async def get_alerts(acknowledged: bool = False):
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
-async def acknowledge_alert(alert_id: int):
+async def acknowledge_alert(alert_id: int, user: Dict = Depends(require_auth)):
     """Acknowledge an alert"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -361,7 +430,7 @@ async def acknowledge_alert(alert_id: int):
 
 
 @app.post("/api/test-alert")
-async def test_alert():
+async def test_alert(user: Dict = Depends(require_auth)):
     """Send test alert"""
     if not alert_manager:
         raise HTTPException(status_code=503, detail="Alert manager not initialized")

@@ -32,10 +32,15 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Enable CORS
+# CORS - restrict to known origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+        "http://localhost:2283",
+        "http://127.0.0.1:2283",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -346,6 +351,28 @@ async def root(request: Request, user: Optional[Dict] = Depends(get_current_user
 async def health_check():
     """Health check endpoint (no auth required)"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/thumbnail/{asset_id}")
+async def proxy_thumbnail(asset_id: str, user: Dict = Depends(get_current_user)):
+    """Proxy thumbnail requests so user tokens are never exposed in URLs."""
+    from fastapi.responses import Response
+    import requests as http_requests
+
+    try:
+        resp = http_requests.get(
+            f"{app.state.immich_api_url}/assets/{asset_id}/thumbnail",
+            headers={"Authorization": f"Bearer {user['access_token']}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return Response(
+            content=resp.content,
+            media_type=resp.headers.get("content-type", "image/jpeg"),
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
 
 
 @app.get("/api/status")

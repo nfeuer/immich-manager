@@ -1,7 +1,7 @@
 # Immich Server Manager Configuration
 
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"  # Use "0.0.0.0" only if you need LAN access and have a reverse proxy/firewall
   port: 8080
   workers: 2
   log_level: "INFO"
