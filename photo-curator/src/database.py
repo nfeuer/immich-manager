@@ -3,11 +3,21 @@ Database models and management for Photo Curator
 """
 
 import sqlite3
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import json
+
+logger = logging.getLogger(__name__)
+
+# Each migration is a (version, description, sql_statements) tuple.
+# Migrations are applied in order and only once.  New schema changes go here.
+MIGRATIONS: List[tuple] = [
+    # Version 1: initial schema (already created by _init_db for fresh installs)
+    (1, "initial schema", []),
+]
 
 
 class Database:
@@ -27,6 +37,7 @@ class Database:
 
         # Initialize database
         self._init_db()
+        self._run_migrations()
 
     @contextmanager
     def _get_connection(self):
@@ -118,6 +129,41 @@ class Database:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_scores_asset ON photo_scores(asset_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON curation_sessions(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_scores_hash ON photo_scores(perceptual_hash)")
+
+            # Schema version tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+    def _run_migrations(self):
+        """Apply pending database migrations in order."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+            current_version = cursor.fetchone()[0]
+
+            for version, description, statements in MIGRATIONS:
+                if version <= current_version:
+                    continue
+                logger.info(f"Applying migration v{version}: {description}")
+                for sql in statements:
+                    cursor.execute(sql)
+                cursor.execute(
+                    "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+                    (version, description),
+                )
+            # If the database is brand new (no migrations recorded), mark v1 as applied
+            if current_version == 0 and MIGRATIONS:
+                cursor.execute("SELECT COUNT(*) FROM schema_version")
+                if cursor.fetchone()[0] == 0:
+                    cursor.execute(
+                        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+                        (1, "initial schema"),
+                    )
 
     def save_photo_score(self, asset_id: str, user_id: str, year: int, month: int, scores: Dict[str, Any]):
         """Save or update photo score"""

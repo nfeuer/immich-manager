@@ -6,6 +6,9 @@ Complete AI-powered photo curation with Immich authentication integration
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
@@ -28,11 +31,15 @@ from .notifications import EmailNotifier
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="Photo Curator Assistant",
     description="AI-powered photo curation for Immich with SSO",
     version="2.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS - restrict to known origins
 app.add_middleware(
@@ -391,13 +398,15 @@ async def root(request: Request, user: Optional[Dict] = Depends(get_current_user
 
 # API Endpoints (all require authentication)
 @app.get("/health")
-async def health_check():
+@limiter.limit("30/minute")
+async def health_check(request: Request):
     """Health check endpoint (no auth required)"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/thumbnail/{asset_id}")
-async def proxy_thumbnail(asset_id: str, user: Dict = Depends(get_current_user)):
+@limiter.limit("200/minute")
+async def proxy_thumbnail(request: Request, asset_id: str, user: Dict = Depends(get_current_user)):
     """Proxy thumbnail requests so user tokens are never exposed in URLs."""
     from fastapi.responses import Response
     import requests as http_requests
@@ -419,7 +428,8 @@ async def proxy_thumbnail(asset_id: str, user: Dict = Depends(get_current_user))
 
 
 @app.get("/api/status")
-async def get_status(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_status(request: Request, user: Dict = Depends(get_current_user)):
     """Get curator status for authenticated user"""
     stats = database.get_statistics() if database else {}
     user_progress = database.get_user_progress(user['id']) if database else {}
@@ -439,7 +449,9 @@ async def get_status(user: Dict = Depends(get_current_user)):
 
 
 @app.post("/api/analyze/{year}/{month}")
+@limiter.limit("5/minute")
 async def analyze_month(
+    request: Request,
     year: int,
     month: int,
     background_tasks: BackgroundTasks,
@@ -543,7 +555,9 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
 
 
 @app.get("/api/photos/{year}/{month}")
+@limiter.limit("30/minute")
 async def get_monthly_photos(
+    request: Request,
     year: int,
     month: int,
     user: Dict = Depends(get_current_user)
@@ -582,7 +596,9 @@ async def get_monthly_photos(
 
 
 @app.post("/api/curation/{year}/{month}/update")
+@limiter.limit("20/minute")
 async def update_curation(
+    request: Request,
     year: int,
     month: int,
     selection: CurationSelection,
@@ -610,7 +626,9 @@ async def update_curation(
 
 
 @app.post("/api/curation/{year}/{month}/complete")
+@limiter.limit("5/minute")
 async def complete_curation(
+    request: Request,
     year: int,
     month: int,
     album_data: AlbumCreate,
@@ -657,7 +675,8 @@ async def complete_curation(
 
 
 @app.get("/api/progress")
-async def get_user_progress(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_user_progress(request: Request, user: Dict = Depends(get_current_user)):
     """Get authenticated user's curation progress"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -674,7 +693,8 @@ async def get_user_progress(user: Dict = Depends(get_current_user)):
 
 
 @app.get("/api/stats")
-async def get_statistics(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_statistics(request: Request, user: Dict = Depends(get_current_user)):
     """Get overall statistics (accessible to all authenticated users)"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -706,7 +726,8 @@ class UserPreferences(BaseModel):
 
 
 @app.get("/api/preferences")
-async def get_preferences(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_preferences(request: Request, user: Dict = Depends(get_current_user)):
     """Get user preferences"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -739,7 +760,9 @@ async def get_preferences(user: Dict = Depends(get_current_user)):
 
 
 @app.put("/api/preferences")
+@limiter.limit("10/minute")
 async def update_preferences(
+    request: Request,
     preferences: UserPreferences,
     user: Dict = Depends(get_current_user)
 ):
@@ -782,7 +805,8 @@ async def analytics_ui(request: Request, user: Optional[Dict] = Depends(get_curr
 
 
 @app.get("/api/analytics")
-async def get_analytics(period: int = 30, user: Dict = Depends(get_current_user)):
+@limiter.limit("15/minute")
+async def get_analytics(request: Request, period: int = 30, user: Dict = Depends(get_current_user)):
     """Get analytics data (accessible to all authenticated users)"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -846,7 +870,9 @@ class DuplicateDelete(BaseModel):
 
 
 @app.post("/api/duplicates/delete")
+@limiter.limit("5/minute")
 async def delete_duplicates(
+    request: Request,
     delete_request: DuplicateDelete,
     user: Dict = Depends(get_current_user)
 ):

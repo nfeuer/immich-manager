@@ -6,6 +6,9 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
@@ -21,15 +24,19 @@ from .database import Database
 from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
 from .backup import BackupManager
 from .alerts import AlertManager
+from .update_checker import UpdateChecker
 
 logger = logging.getLogger(__name__)
 
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="Immich Server Manager",
     description="Monitoring, backups, and management for Immich installations",
     version="1.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # --- Authentication ---
@@ -128,6 +135,7 @@ system_monitor: Optional[SystemMonitor] = None
 docker_monitor: Optional[DockerMonitor] = None
 backup_manager: Optional[BackupManager] = None
 alert_manager: Optional[AlertManager] = None
+update_checker: Optional[UpdateChecker] = None
 scheduler: Optional[AsyncIOScheduler] = None
 
 
@@ -135,7 +143,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 async def startup_event():
     """Initialize application on startup"""
     global config, database, disk_monitor, system_monitor, docker_monitor
-    global backup_manager, alert_manager, scheduler
+    global backup_manager, alert_manager, update_checker, scheduler
 
     try:
         # Load configuration
@@ -155,6 +163,9 @@ async def startup_event():
 
         # Initialize alert manager
         alert_manager = AlertManager(config.alerts)
+
+        # Initialize update checker
+        update_checker = UpdateChecker(docker_monitor)
 
         # Store Immich API URL for auth validation
         app.state.immich_api_url = config.immich.api_url
@@ -194,6 +205,14 @@ async def startup_event():
             day_of_week='sun',
             hour=3,
             id='cleanup'
+        )
+
+        # Check for Immich updates (daily at 10 AM)
+        scheduler.add_job(
+            check_immich_update_job,
+            'cron',
+            hour=10,
+            id='immich_update_check'
         )
 
         scheduler.start()
@@ -335,6 +354,34 @@ async def cleanup_job():
         print(f"Error in cleanup job: {e}")
 
 
+async def check_immich_update_job():
+    """Background job to check for Immich updates on GitHub"""
+    if not update_checker or not alert_manager or not database:
+        return
+
+    try:
+        update_info = update_checker.check_for_update()
+        if update_info:
+            msg = (
+                f"Immich v{update_info['latest_version']} is available "
+                f"(currently running v{update_info['running_version']}).\n"
+                f"Release notes: {update_info['release_url']}"
+            )
+            await alert_manager.send_alert(
+                "Immich Update Available",
+                msg,
+                "info",
+            )
+            database.record_alert(
+                "info",
+                "immich_update",
+                msg,
+            )
+            print(f"Immich update available: v{update_info['latest_version']}")
+    except Exception as e:
+        print(f"Error checking Immich updates: {e}")
+
+
 # API Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -356,13 +403,15 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
+@limiter.limit("30/minute")
+async def health_check(request: Request):
     """Health check endpoint"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/status")
-async def get_status(user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_status(request: Request, user: Dict = Depends(require_auth)):
     """Get overall system status"""
     if not system_monitor or not docker_monitor:
         raise HTTPException(status_code=503, detail="Monitors not initialized")
@@ -376,7 +425,8 @@ async def get_status(user: Dict = Depends(require_auth)):
 
 
 @app.get("/api/disks")
-async def get_disk_health(user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_disk_health(request: Request, user: Dict = Depends(require_auth)):
     """Get current disk health"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -388,7 +438,8 @@ async def get_disk_health(user: Dict = Depends(require_auth)):
 
 
 @app.get("/api/metrics")
-async def get_metrics(hours: int = 24, user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_metrics(request: Request, hours: int = 24, user: Dict = Depends(require_auth)):
     """Get system metrics for time range"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -400,7 +451,8 @@ async def get_metrics(hours: int = 24, user: Dict = Depends(require_auth)):
 
 
 @app.get("/api/backups")
-async def get_backups(user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_backups(request: Request, user: Dict = Depends(require_auth)):
     """Get backup history"""
     if not database or not backup_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
@@ -412,7 +464,8 @@ async def get_backups(user: Dict = Depends(require_auth)):
 
 
 @app.post("/api/backup/now")
-async def trigger_backup(background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
+@limiter.limit("2/minute")
+async def trigger_backup(request: Request, background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
     """Trigger immediate backup"""
     if not backup_manager:
         raise HTTPException(status_code=503, detail="Backup manager not initialized")
@@ -426,7 +479,8 @@ async def trigger_backup(background_tasks: BackgroundTasks, user: Dict = Depends
 
 
 @app.get("/api/alerts")
-async def get_alerts(acknowledged: bool = False, user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_alerts(request: Request, acknowledged: bool = False, user: Dict = Depends(require_auth)):
     """Get alerts"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -437,7 +491,8 @@ async def get_alerts(acknowledged: bool = False, user: Dict = Depends(require_au
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
-async def acknowledge_alert(alert_id: int, user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def acknowledge_alert(request: Request, alert_id: int, user: Dict = Depends(require_auth)):
     """Acknowledge an alert"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -448,7 +503,8 @@ async def acknowledge_alert(alert_id: int, user: Dict = Depends(require_auth)):
 
 
 @app.post("/api/test-alert")
-async def test_alert(user: Dict = Depends(require_auth)):
+@limiter.limit("3/minute")
+async def test_alert(request: Request, user: Dict = Depends(require_auth)):
     """Send test alert"""
     if not alert_manager:
         raise HTTPException(status_code=503, detail="Alert manager not initialized")
@@ -460,6 +516,35 @@ async def test_alert(user: Dict = Depends(require_auth)):
     )
 
     return {"status": "sent"}
+
+
+@app.get("/api/immich-update")
+@limiter.limit("5/minute")
+async def check_immich_update(request: Request, user: Dict = Depends(require_auth)):
+    """Check if a newer Immich version is available on GitHub"""
+    if not update_checker:
+        raise HTTPException(status_code=503, detail="Update checker not initialized")
+
+    running = update_checker.get_running_version()
+    latest = update_checker.get_latest_github_version()
+
+    result = {
+        "running_version": running,
+        "latest_version": latest,
+        "update_available": False,
+    }
+
+    if running and latest:
+        try:
+            result["update_available"] = (
+                update_checker._parse_version(latest) > update_checker._parse_version(running)
+            )
+        except (ValueError, TypeError):
+            pass
+        if result["update_available"]:
+            result["release_url"] = f"https://github.com/immich-app/immich/releases/tag/v{latest}"
+
+    return result
 
 
 def main():
