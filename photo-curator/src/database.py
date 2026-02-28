@@ -17,6 +17,28 @@ logger = logging.getLogger(__name__)
 MIGRATIONS: List[tuple] = [
     # Version 1: initial schema (already created by _init_db for fresh installs)
     (1, "initial schema", []),
+    # Version 2: shared curation (Family Mode) tables
+    (2, "add shared curation tables", [
+        """CREATE TABLE IF NOT EXISTS shared_curations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            collaborator_id TEXT NOT NULL,
+            invited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(owner_id, year, month, collaborator_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS shared_selections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            contributor_id TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(owner_id, year, month, contributor_id, asset_id)
+        )""",
+    ]),
 ]
 
 
@@ -554,3 +576,172 @@ class Database:
             ]
 
             return analytics
+
+    # ------------------------------------------------------------------
+    # Year in Review
+    # ------------------------------------------------------------------
+
+    def get_year_in_review(self, user_id: str, year: int) -> Dict[str, Any]:
+        """Build an annual summary for a single user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            review: Dict[str, Any] = {"user_id": user_id, "year": year}
+
+            # Photos per month
+            cursor.execute("""
+                SELECT month, COUNT(*) as count, AVG(score) as avg_score,
+                       MAX(score) as best_score
+                FROM photo_scores
+                WHERE user_id = ? AND year = ?
+                GROUP BY month ORDER BY month
+            """, (user_id, year))
+            review["months"] = [
+                {
+                    "month": r["month"],
+                    "photo_count": r["count"],
+                    "avg_score": round(r["avg_score"], 2) if r["avg_score"] else 0,
+                    "best_score": round(r["best_score"], 2) if r["best_score"] else 0,
+                }
+                for r in cursor.fetchall()
+            ]
+
+            # Total photos
+            cursor.execute("""
+                SELECT COUNT(*) as total FROM photo_scores
+                WHERE user_id = ? AND year = ?
+            """, (user_id, year))
+            review["total_photos"] = cursor.fetchone()["total"]
+
+            # Sessions completed
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM curation_sessions
+                WHERE user_id = ? AND year = ? AND completed = 1
+            """, (user_id, year))
+            review["months_curated"] = cursor.fetchone()["cnt"]
+
+            # Top 10 photos of the year
+            cursor.execute("""
+                SELECT asset_id, month, score, face_count
+                FROM photo_scores
+                WHERE user_id = ? AND year = ?
+                ORDER BY score DESC LIMIT 10
+            """, (user_id, year))
+            review["top_photos"] = [dict(r) for r in cursor.fetchall()]
+
+            # Face stats
+            cursor.execute("""
+                SELECT SUM(face_count) as total_faces,
+                       COUNT(CASE WHEN face_count > 0 THEN 1 END) as photos_with_faces
+                FROM photo_scores
+                WHERE user_id = ? AND year = ?
+            """, (user_id, year))
+            row = cursor.fetchone()
+            review["total_faces"] = row["total_faces"] or 0
+            review["photos_with_faces"] = row["photos_with_faces"] or 0
+
+            # Duplicate savings
+            cursor.execute("""
+                SELECT COUNT(*) as dup_groups FROM duplicate_groups
+            """)
+            review["duplicate_groups_found"] = cursor.fetchone()["dup_groups"]
+
+            return review
+
+    # ------------------------------------------------------------------
+    # Photo map data (GPS from EXIF metadata JSON)
+    # ------------------------------------------------------------------
+
+    def get_photos_with_location(self, user_id: str, year: Optional[int] = None,
+                                  month: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Return photos that have GPS coordinates in their metadata."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT asset_id, year, month, score, metadata FROM photo_scores WHERE user_id = ?"
+            params: list = [user_id]
+            if year:
+                query += " AND year = ?"
+                params.append(year)
+            if month:
+                query += " AND month = ?"
+                params.append(month)
+            cursor.execute(query, params)
+
+            results = []
+            for row in cursor.fetchall():
+                meta = row["metadata"]
+                if not meta:
+                    continue
+                try:
+                    meta_dict = json.loads(meta) if isinstance(meta, str) else meta
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+                lat = meta_dict.get("latitude") or meta_dict.get("lat")
+                lon = meta_dict.get("longitude") or meta_dict.get("lng") or meta_dict.get("lon")
+                if lat and lon:
+                    results.append({
+                        "asset_id": row["asset_id"],
+                        "year": row["year"],
+                        "month": row["month"],
+                        "score": row["score"],
+                        "latitude": float(lat),
+                        "longitude": float(lon),
+                    })
+            return results
+
+    # ------------------------------------------------------------------
+    # Shared curation (Family Mode)
+    # ------------------------------------------------------------------
+
+    def invite_collaborator(self, owner_id: str, year: int, month: int,
+                            collaborator_id: str):
+        """Invite another user to contribute picks."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("""
+                INSERT OR IGNORE INTO shared_curations
+                    (owner_id, year, month, collaborator_id)
+                VALUES (?, ?, ?, ?)
+            """, (owner_id, year, month, collaborator_id))
+
+    def get_collaborators(self, owner_id: str, year: int, month: int) -> List[str]:
+        """Get collaborator IDs for a session."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT collaborator_id FROM shared_curations
+                WHERE owner_id = ? AND year = ? AND month = ?
+            """, (owner_id, year, month))
+            return [r["collaborator_id"] for r in cursor.fetchall()]
+
+    def get_shared_sessions(self, collaborator_id: str) -> List[Dict[str, Any]]:
+        """Get sessions where the user has been invited as collaborator."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT owner_id, year, month, invited_at FROM shared_curations
+                WHERE collaborator_id = ?
+                ORDER BY invited_at DESC
+            """, (collaborator_id,))
+            return [dict(r) for r in cursor.fetchall()]
+
+    def add_shared_selection(self, owner_id: str, year: int, month: int,
+                             contributor_id: str, asset_id: str):
+        """A collaborator adds a photo pick to a shared session."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("""
+                INSERT OR IGNORE INTO shared_selections
+                    (owner_id, year, month, contributor_id, asset_id)
+                VALUES (?, ?, ?, ?, ?)
+            """, (owner_id, year, month, contributor_id, asset_id))
+
+    def get_shared_selections(self, owner_id: str, year: int, month: int) -> List[Dict[str, Any]]:
+        """Get all collaborator selections for a session."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT contributor_id, asset_id, added_at FROM shared_selections
+                WHERE owner_id = ? AND year = ? AND month = ?
+                ORDER BY added_at
+            """, (owner_id, year, month))
+            return [dict(r) for r in cursor.fetchall()]

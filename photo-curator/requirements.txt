@@ -14,3 +14,4 @@ aiosmtplib>=3.0.2,<4.0
 websockets>=14.0,<17.0
 aiosqlite>=0.20.0,<1.0
 slowapi>=0.1.9,<1.0
+sdnotify>=0.3.2,<1.0  # Systemd watchdog heartbeat

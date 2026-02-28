@@ -4,13 +4,14 @@ After=network.target docker.service
 Requires=docker.service
 
 [Service]
-Type=simple
+Type=notify
 User=root
 WorkingDirectory=/opt/immich-server-manager
 Environment="PATH=/opt/immich-server-manager/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/opt/immich-server-manager/venv/bin/python -m uvicorn src.main:app --host 0.0.0.0 --port 8080 --workers 2
 Restart=always
 RestartSec=10
+WatchdogSec=60
 
 # Security settings
 NoNewPrivileges=false
