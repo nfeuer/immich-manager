@@ -3,9 +3,13 @@ Main FastAPI application for Immich Server Manager
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from pydantic import BaseModel
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
@@ -15,21 +19,30 @@ import uvicorn
 import asyncio
 import requests as http_requests
 import logging
+import sdnotify
 
 from .config import load_config, Config
 from .database import Database
 from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
 from .backup import BackupManager
 from .alerts import AlertManager
+from .update_checker import UpdateChecker
+from .prometheus import generate_metrics
+from .audit import ensure_audit_table, record_audit, get_audit_log
+from .logging_config import setup_json_logging
 
+setup_json_logging()
 logger = logging.getLogger(__name__)
 
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="Immich Server Manager",
     description="Monitoring, backups, and management for Immich installations",
     version="1.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # --- Authentication ---
@@ -128,6 +141,7 @@ system_monitor: Optional[SystemMonitor] = None
 docker_monitor: Optional[DockerMonitor] = None
 backup_manager: Optional[BackupManager] = None
 alert_manager: Optional[AlertManager] = None
+update_checker: Optional[UpdateChecker] = None
 scheduler: Optional[AsyncIOScheduler] = None
 
 
@@ -135,7 +149,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 async def startup_event():
     """Initialize application on startup"""
     global config, database, disk_monitor, system_monitor, docker_monitor
-    global backup_manager, alert_manager, scheduler
+    global backup_manager, alert_manager, update_checker, scheduler
 
     try:
         # Load configuration
@@ -143,6 +157,7 @@ async def startup_event():
 
         # Initialize database
         database = Database()
+        ensure_audit_table(database)
 
         # Initialize monitors
         all_drives = config.storage.data_drives + config.storage.parity_drives
@@ -155,6 +170,9 @@ async def startup_event():
 
         # Initialize alert manager
         alert_manager = AlertManager(config.alerts)
+
+        # Initialize update checker
+        update_checker = UpdateChecker(docker_monitor)
 
         # Store Immich API URL for auth validation
         app.state.immich_api_url = config.immich.api_url
@@ -196,16 +214,35 @@ async def startup_event():
             id='cleanup'
         )
 
+        # Check for Immich updates (daily at 10 AM)
+        scheduler.add_job(
+            check_immich_update_job,
+            'cron',
+            hour=10,
+            id='immich_update_check'
+        )
+
+        # Watchdog heartbeat (every 30s, half of WatchdogSec=60)
+        async def _watchdog_heartbeat():
+            sd = sdnotify.SystemdNotifier(debug=False)
+            sd.notify("WATCHDOG=1")
+
+        scheduler.add_job(_watchdog_heartbeat, "interval", seconds=30, id="watchdog")
+
         scheduler.start()
 
-        print("✓ Immich Server Manager started successfully")
-        print(f"✓ Dashboard: http://{config.server.host}:{config.server.port}")
+        # Signal systemd that we are ready
+        sd = sdnotify.SystemdNotifier(debug=False)
+        sd.notify("READY=1")
+
+        logger.info("Immich Server Manager started successfully")
+        logger.info(f"Dashboard: http://{config.server.host}:{config.server.port}")
 
     except FileNotFoundError as e:
-        print(f"✗ Configuration error: {e}")
+        logger.error(f"Configuration error: {e}")
         raise
     except Exception as e:
-        print(f"✗ Startup error: {e}")
+        logger.error(f"Startup error: {e}")
         raise
 
 
@@ -335,6 +372,34 @@ async def cleanup_job():
         print(f"Error in cleanup job: {e}")
 
 
+async def check_immich_update_job():
+    """Background job to check for Immich updates on GitHub"""
+    if not update_checker or not alert_manager or not database:
+        return
+
+    try:
+        update_info = update_checker.check_for_update()
+        if update_info:
+            msg = (
+                f"Immich v{update_info['latest_version']} is available "
+                f"(currently running v{update_info['running_version']}).\n"
+                f"Release notes: {update_info['release_url']}"
+            )
+            await alert_manager.send_alert(
+                "Immich Update Available",
+                msg,
+                "info",
+            )
+            database.record_alert(
+                "info",
+                "immich_update",
+                msg,
+            )
+            print(f"Immich update available: v{update_info['latest_version']}")
+    except Exception as e:
+        print(f"Error checking Immich updates: {e}")
+
+
 # API Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -356,13 +421,15 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
+@limiter.limit("30/minute")
+async def health_check(request: Request):
     """Health check endpoint"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/status")
-async def get_status(user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_status(request: Request, user: Dict = Depends(require_auth)):
     """Get overall system status"""
     if not system_monitor or not docker_monitor:
         raise HTTPException(status_code=503, detail="Monitors not initialized")
@@ -376,7 +443,8 @@ async def get_status(user: Dict = Depends(require_auth)):
 
 
 @app.get("/api/disks")
-async def get_disk_health(user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_disk_health(request: Request, user: Dict = Depends(require_auth)):
     """Get current disk health"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -388,7 +456,8 @@ async def get_disk_health(user: Dict = Depends(require_auth)):
 
 
 @app.get("/api/metrics")
-async def get_metrics(hours: int = 24, user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_metrics(request: Request, hours: int = 24, user: Dict = Depends(require_auth)):
     """Get system metrics for time range"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -400,7 +469,8 @@ async def get_metrics(hours: int = 24, user: Dict = Depends(require_auth)):
 
 
 @app.get("/api/backups")
-async def get_backups(user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_backups(request: Request, user: Dict = Depends(require_auth)):
     """Get backup history"""
     if not database or not backup_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
@@ -412,7 +482,8 @@ async def get_backups(user: Dict = Depends(require_auth)):
 
 
 @app.post("/api/backup/now")
-async def trigger_backup(background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
+@limiter.limit("2/minute")
+async def trigger_backup(request: Request, background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
     """Trigger immediate backup"""
     if not backup_manager:
         raise HTTPException(status_code=503, detail="Backup manager not initialized")
@@ -426,7 +497,8 @@ async def trigger_backup(background_tasks: BackgroundTasks, user: Dict = Depends
 
 
 @app.get("/api/alerts")
-async def get_alerts(acknowledged: bool = False, user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def get_alerts(request: Request, acknowledged: bool = False, user: Dict = Depends(require_auth)):
     """Get alerts"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -437,7 +509,8 @@ async def get_alerts(acknowledged: bool = False, user: Dict = Depends(require_au
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
-async def acknowledge_alert(alert_id: int, user: Dict = Depends(require_auth)):
+@limiter.limit("30/minute")
+async def acknowledge_alert(request: Request, alert_id: int, user: Dict = Depends(require_auth)):
     """Acknowledge an alert"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -448,7 +521,8 @@ async def acknowledge_alert(alert_id: int, user: Dict = Depends(require_auth)):
 
 
 @app.post("/api/test-alert")
-async def test_alert(user: Dict = Depends(require_auth)):
+@limiter.limit("3/minute")
+async def test_alert(request: Request, user: Dict = Depends(require_auth)):
     """Send test alert"""
     if not alert_manager:
         raise HTTPException(status_code=503, detail="Alert manager not initialized")
@@ -460,6 +534,175 @@ async def test_alert(user: Dict = Depends(require_auth)):
     )
 
     return {"status": "sent"}
+
+
+@app.get("/api/immich-update")
+@limiter.limit("5/minute")
+async def check_immich_update(request: Request, user: Dict = Depends(require_auth)):
+    """Check if a newer Immich version is available on GitHub"""
+    if not update_checker:
+        raise HTTPException(status_code=503, detail="Update checker not initialized")
+
+    running = update_checker.get_running_version()
+    latest = update_checker.get_latest_github_version()
+
+    result = {
+        "running_version": running,
+        "latest_version": latest,
+        "update_available": False,
+    }
+
+    if running and latest:
+        try:
+            result["update_available"] = (
+                update_checker._parse_version(latest) > update_checker._parse_version(running)
+            )
+        except (ValueError, TypeError):
+            pass
+        if result["update_available"]:
+            result["release_url"] = f"https://github.com/immich-app/immich/releases/tag/v{latest}"
+
+    return result
+
+
+# --- Prometheus metrics ---
+
+@app.get("/metrics", response_class=PlainTextResponse)
+@limiter.limit("30/minute")
+async def prometheus_metrics(request: Request):
+    """Prometheus-compatible metrics endpoint (no auth — restrict via firewall)."""
+    body = generate_metrics(system_monitor, docker_monitor, disk_monitor, database)
+    return PlainTextResponse(body, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+# --- Audit log ---
+
+@app.get("/api/audit")
+@limiter.limit("15/minute")
+async def get_audit(
+    request: Request,
+    limit: int = 100,
+    action: Optional[str] = None,
+    user: Dict = Depends(require_auth),
+):
+    """Get audit log entries."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"entries": get_audit_log(database, limit=limit, action_filter=action)}
+
+
+# --- Backup restore workflow ---
+
+class RestoreRequest(BaseModel):
+    backup_file: str
+
+
+@app.get("/api/backups/available")
+@limiter.limit("10/minute")
+async def list_available_backups(request: Request, user: Dict = Depends(require_auth)):
+    """List all backup files available for restore."""
+    if not backup_manager:
+        raise HTTPException(status_code=503, detail="Backup manager not initialized")
+    return {"backups": backup_manager.list_backups()}
+
+
+@app.post("/api/restore")
+@limiter.limit("1/minute")
+async def restore_backup(
+    request: Request,
+    restore_req: RestoreRequest,
+    background_tasks: BackgroundTasks,
+    user: Dict = Depends(require_auth),
+):
+    """
+    Restore Immich database from a backup file.
+
+    This will:
+      1. Verify the backup file exists and checksum is valid
+      2. Stop Immich containers
+      3. Restore the database
+      4. Restart Immich containers
+    """
+    if not backup_manager or not docker_monitor or not database:
+        raise HTTPException(status_code=503, detail="Services not initialized")
+
+    backup_path = Path(restore_req.backup_file)
+    if not backup_path.exists():
+        # Also check backup directory
+        backup_path = Path(backup_manager.backup_dir) / restore_req.backup_file
+        if not backup_path.exists():
+            raise HTTPException(status_code=404, detail="Backup file not found")
+
+    user_id = user.get("id", "unknown")
+    record_audit(database, "restore_initiated", user_id=user_id,
+                 details=f"file={backup_path}", ip_address=request.client.host)
+
+    background_tasks.add_task(_restore_background, str(backup_path), user_id)
+
+    return {
+        "status": "started",
+        "message": f"Restore from {backup_path.name} started in background",
+    }
+
+
+async def _restore_background(backup_file: str, user_id: str):
+    """Run the full restore workflow in the background."""
+    try:
+        logger.info(f"Starting restore from {backup_file}")
+
+        # Stop Immich
+        if docker_monitor:
+            docker_monitor.stop_immich()
+
+        # Restore
+        result = backup_manager.restore_database(backup_file)
+
+        # Restart Immich
+        if docker_monitor:
+            docker_monitor.start_immich()
+
+        if result["status"] == "success":
+            logger.info("Restore completed successfully")
+            record_audit(database, "restore_completed", user_id=user_id,
+                         details=f"file={backup_file}")
+            if alert_manager:
+                await alert_manager.send_alert(
+                    "Backup Restored",
+                    f"Database restored from {Path(backup_file).name}",
+                    "info",
+                )
+        else:
+            logger.error(f"Restore failed: {result.get('error')}")
+            record_audit(database, "restore_failed", user_id=user_id,
+                         details=result.get("error", "unknown"))
+            if alert_manager:
+                await alert_manager.send_alert(
+                    "Restore Failed",
+                    f"Restore failed: {result.get('error')}",
+                    "critical",
+                )
+
+    except Exception as e:
+        logger.error(f"Restore error: {e}")
+        if database:
+            record_audit(database, "restore_failed", user_id=user_id, details=str(e))
+
+
+# Add audit recording to key existing actions
+_original_trigger_backup = trigger_backup
+
+
+@app.post("/api/backup/now", response_model=None)
+@limiter.limit("2/minute")
+async def trigger_backup_audited(request: Request, background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
+    """Trigger immediate backup (with audit logging)."""
+    if not backup_manager:
+        raise HTTPException(status_code=503, detail="Backup manager not initialized")
+    if database:
+        record_audit(database, "backup_triggered", user_id=user.get("id"),
+                     ip_address=request.client.host)
+    background_tasks.add_task(backup_job)
+    return {"status": "started", "message": "Backup started in background"}
 
 
 def main():

@@ -88,10 +88,19 @@ class WebhookConfig(BaseModel):
     url: str = ""
 
 
+class DiscordConfig(BaseModel):
+    """Discord webhook alert configuration"""
+    enabled: bool = False
+    webhook_url: str = ""
+    bot_name: str = "House of Feuer"
+    server_name: str = ""  # Optional: your server's display name
+
+
 class AlertsConfig(BaseModel):
     """Alerts configuration"""
     email: EmailConfig = Field(default_factory=EmailConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
+    discord: DiscordConfig = Field(default_factory=DiscordConfig)
     quiet_hours: QuietHoursConfig = Field(default_factory=QuietHoursConfig)
 
 

@@ -265,3 +265,18 @@ class DockerMonitor:
 
         # Check if all containers are running
         return all(c['status'] == 'running' for c in containers)
+
+    def stop_immich(self):
+        """Stop all Immich containers."""
+        if not self.available:
+            return
+        for c in self.client.containers.list(filters={"name": "immich"}):
+            c.stop(timeout=30)
+
+    def start_immich(self):
+        """Start all stopped Immich containers."""
+        if not self.available:
+            return
+        for c in self.client.containers.list(all=True, filters={"name": "immich"}):
+            if c.status != "running":
+                c.start()

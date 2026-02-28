@@ -6,6 +6,9 @@ Complete AI-powered photo curation with Immich authentication integration
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +19,7 @@ import yaml
 import logging
 import asyncio
 import re
+import sdnotify
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import Database
@@ -23,16 +27,20 @@ from .immich_client import ImmichClient, PhotoCache
 from .analyzer import PhotoAnalyzer
 from .auth import ImmichAuth, get_current_user, get_current_user_optional, get_user_api_client
 from .notifications import EmailNotifier
+from .logging_config import setup_json_logging
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+setup_json_logging()
 logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="Photo Curator Assistant",
     description="AI-powered photo curation for Immich with SSO",
     version="2.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS - restrict to known origins
 app.add_middleware(
@@ -53,12 +61,12 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     """Add security headers to every response."""
     response = await call_next(request)
-    # Photo curator uses Tailwind CDN and Chart.js CDN in some pages
+    # Photo curator uses Tailwind CDN, Chart.js CDN, and Leaflet map tiles
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
-        "img-src 'self' data: blob:; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com; "
+        "img-src 'self' data: blob: https://*.tile.openstreetmap.org; "
         "connect-src 'self'; "
         "font-src 'self' https://cdn.jsdelivr.net; "
         "frame-ancestors 'none'"
@@ -200,15 +208,26 @@ async def startup_event():
             replace_existing=True
         )
 
-        scheduler.start()
-        logger.info(f"✓ Scheduler started (monthly reminders at {reminder_time})")
+        # Watchdog heartbeat (every 30s, half of WatchdogSec=60)
+        async def _watchdog_heartbeat():
+            sd = sdnotify.SystemdNotifier(debug=False)
+            sd.notify("WATCHDOG=1")
 
-        logger.info("✓ Photo Curator started successfully (with Immich SSO)")
-        logger.info(f"✓ Web UI: http://{config['server']['host']}:{config['server']['port']}")
-        logger.info(f"✓ Immich URL: {immich_base_url}")
+        scheduler.add_job(_watchdog_heartbeat, "interval", seconds=30, id="watchdog")
+
+        scheduler.start()
+        logger.info(f"Scheduler started (monthly reminders at {reminder_time})")
+
+        # Signal systemd that we are ready
+        sd = sdnotify.SystemdNotifier(debug=False)
+        sd.notify("READY=1")
+
+        logger.info("Photo Curator started successfully (with Immich SSO)")
+        logger.info(f"Web UI: http://{config['server']['host']}:{config['server']['port']}")
+        logger.info(f"Immich URL: {immich_base_url}")
 
     except Exception as e:
-        logger.error(f"✗ Startup error: {e}")
+        logger.error(f"Startup error: {e}")
         raise
 
 
@@ -391,13 +410,15 @@ async def root(request: Request, user: Optional[Dict] = Depends(get_current_user
 
 # API Endpoints (all require authentication)
 @app.get("/health")
-async def health_check():
+@limiter.limit("30/minute")
+async def health_check(request: Request):
     """Health check endpoint (no auth required)"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/thumbnail/{asset_id}")
-async def proxy_thumbnail(asset_id: str, user: Dict = Depends(get_current_user)):
+@limiter.limit("200/minute")
+async def proxy_thumbnail(request: Request, asset_id: str, user: Dict = Depends(get_current_user)):
     """Proxy thumbnail requests so user tokens are never exposed in URLs."""
     from fastapi.responses import Response
     import requests as http_requests
@@ -419,7 +440,8 @@ async def proxy_thumbnail(asset_id: str, user: Dict = Depends(get_current_user))
 
 
 @app.get("/api/status")
-async def get_status(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_status(request: Request, user: Dict = Depends(get_current_user)):
     """Get curator status for authenticated user"""
     stats = database.get_statistics() if database else {}
     user_progress = database.get_user_progress(user['id']) if database else {}
@@ -439,7 +461,9 @@ async def get_status(user: Dict = Depends(get_current_user)):
 
 
 @app.post("/api/analyze/{year}/{month}")
+@limiter.limit("5/minute")
 async def analyze_month(
+    request: Request,
     year: int,
     month: int,
     background_tasks: BackgroundTasks,
@@ -543,7 +567,9 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
 
 
 @app.get("/api/photos/{year}/{month}")
+@limiter.limit("30/minute")
 async def get_monthly_photos(
+    request: Request,
     year: int,
     month: int,
     user: Dict = Depends(get_current_user)
@@ -582,7 +608,9 @@ async def get_monthly_photos(
 
 
 @app.post("/api/curation/{year}/{month}/update")
+@limiter.limit("20/minute")
 async def update_curation(
+    request: Request,
     year: int,
     month: int,
     selection: CurationSelection,
@@ -610,7 +638,9 @@ async def update_curation(
 
 
 @app.post("/api/curation/{year}/{month}/complete")
+@limiter.limit("5/minute")
 async def complete_curation(
+    request: Request,
     year: int,
     month: int,
     album_data: AlbumCreate,
@@ -657,7 +687,8 @@ async def complete_curation(
 
 
 @app.get("/api/progress")
-async def get_user_progress(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_user_progress(request: Request, user: Dict = Depends(get_current_user)):
     """Get authenticated user's curation progress"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -674,7 +705,8 @@ async def get_user_progress(user: Dict = Depends(get_current_user)):
 
 
 @app.get("/api/stats")
-async def get_statistics(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_statistics(request: Request, user: Dict = Depends(get_current_user)):
     """Get overall statistics (accessible to all authenticated users)"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -706,7 +738,8 @@ class UserPreferences(BaseModel):
 
 
 @app.get("/api/preferences")
-async def get_preferences(user: Dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def get_preferences(request: Request, user: Dict = Depends(get_current_user)):
     """Get user preferences"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -739,7 +772,9 @@ async def get_preferences(user: Dict = Depends(get_current_user)):
 
 
 @app.put("/api/preferences")
+@limiter.limit("10/minute")
 async def update_preferences(
+    request: Request,
     preferences: UserPreferences,
     user: Dict = Depends(get_current_user)
 ):
@@ -782,7 +817,8 @@ async def analytics_ui(request: Request, user: Optional[Dict] = Depends(get_curr
 
 
 @app.get("/api/analytics")
-async def get_analytics(period: int = 30, user: Dict = Depends(get_current_user)):
+@limiter.limit("15/minute")
+async def get_analytics(request: Request, period: int = 30, user: Dict = Depends(get_current_user)):
     """Get analytics data (accessible to all authenticated users)"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -846,7 +882,9 @@ class DuplicateDelete(BaseModel):
 
 
 @app.post("/api/duplicates/delete")
+@limiter.limit("5/minute")
 async def delete_duplicates(
+    request: Request,
     delete_request: DuplicateDelete,
     user: Dict = Depends(get_current_user)
 ):
@@ -886,6 +924,148 @@ async def delete_duplicates(
     except Exception as e:
         logger.error(f"Error deleting duplicates: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ====================================================================
+# Year in Review
+# ====================================================================
+
+@app.get("/year-in-review", response_class=HTMLResponse)
+async def year_in_review_ui(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):
+    """Serve Year in Review page."""
+    if not user:
+        return RedirectResponse(url=app.state.immich_auth.login_redirect_url(request))
+    html_path = Path(__file__).parent.parent / "static" / "year-in-review.html"
+    if html_path.exists():
+        return html_path.read_text()
+    return HTMLResponse("<h1>Year in Review page not found</h1>", status_code=404)
+
+
+@app.get("/api/year-in-review/{year}")
+@limiter.limit("10/minute")
+async def get_year_in_review(request: Request, year: int, user: Dict = Depends(get_current_user)):
+    """Get annual summary for the authenticated user."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return database.get_year_in_review(user["id"], year)
+
+
+# ====================================================================
+# Photo Map View
+# ====================================================================
+
+@app.get("/map", response_class=HTMLResponse)
+async def map_ui(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):
+    """Serve photo map page."""
+    if not user:
+        return RedirectResponse(url=app.state.immich_auth.login_redirect_url(request))
+    html_path = Path(__file__).parent.parent / "static" / "map.html"
+    if html_path.exists():
+        return html_path.read_text()
+    return HTMLResponse("<h1>Map page not found</h1>", status_code=404)
+
+
+@app.get("/api/photos/map")
+@limiter.limit("15/minute")
+async def get_map_data(
+    request: Request,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    user: Dict = Depends(get_current_user),
+):
+    """Get geotagged photos for map display."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"photos": database.get_photos_with_location(user["id"], year, month)}
+
+
+# ====================================================================
+# Family Mode — Shared Curation
+# ====================================================================
+
+class ShareInvite(BaseModel):
+    collaborator_id: str
+
+
+class SharedPick(BaseModel):
+    asset_id: str
+
+
+@app.post("/api/curation/{year}/{month}/share")
+@limiter.limit("10/minute")
+async def invite_collaborator(
+    request: Request,
+    year: int,
+    month: int,
+    invite: ShareInvite,
+    user: Dict = Depends(get_current_user),
+):
+    """Invite another Immich user to contribute picks to your curation."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    database.invite_collaborator(user["id"], year, month, invite.collaborator_id)
+    return {"status": "invited", "collaborator_id": invite.collaborator_id}
+
+
+@app.get("/api/curation/{year}/{month}/collaborators")
+@limiter.limit("30/minute")
+async def get_collaborators(
+    request: Request, year: int, month: int,
+    user: Dict = Depends(get_current_user),
+):
+    """List collaborators for a shared curation session."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"collaborators": database.get_collaborators(user["id"], year, month)}
+
+
+@app.get("/api/shared-sessions")
+@limiter.limit("30/minute")
+async def get_shared_sessions(request: Request, user: Dict = Depends(get_current_user)):
+    """Get curation sessions where this user has been invited."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"sessions": database.get_shared_sessions(user["id"])}
+
+
+@app.post("/api/curation/{year}/{month}/shared-pick")
+@limiter.limit("30/minute")
+async def add_shared_pick(
+    request: Request,
+    year: int,
+    month: int,
+    pick: SharedPick,
+    owner_id: str = "",
+    user: Dict = Depends(get_current_user),
+):
+    """
+    Contribute a photo pick to a shared curation session.
+    ``owner_id`` query param specifies whose session to contribute to.
+    """
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    if not owner_id:
+        raise HTTPException(status_code=400, detail="owner_id query parameter required")
+
+    # Verify the user is actually a collaborator
+    collabs = database.get_collaborators(owner_id, year, month)
+    if user["id"] not in collabs:
+        raise HTTPException(status_code=403, detail="You are not a collaborator on this session")
+
+    database.add_shared_selection(owner_id, year, month, user["id"], pick.asset_id)
+    return {"status": "added", "asset_id": pick.asset_id}
+
+
+@app.get("/api/curation/{year}/{month}/shared-selections")
+@limiter.limit("30/minute")
+async def get_shared_selections(
+    request: Request, year: int, month: int,
+    user: Dict = Depends(get_current_user),
+):
+    """Get all collaborator picks for the owner's session."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"selections": database.get_shared_selections(user["id"], year, month)}
 
 
 def main():
