@@ -1,0 +1,88 @@
+# =============================================================================
+# core.yml — Shared homelab infrastructure
+# =============================================================================
+# This file owns the "homelab" Docker network that every service stack joins.
+# Include it in every docker compose invocation:
+#
+#   docker compose -f docker/core.yml -f docker/immich.yml up -d
+#
+# WHY A SHARED EXTERNAL NETWORK?
+#   Each service lives in its own compose file (immich.yml, jellyfin.yml, etc.).
+#   Because they declare `homelab` as an external network, they can all reach
+#   each other by container name — and a single reverse proxy container joining
+#   this network can route to any of them without needing host-port bindings.
+#
+#   To add a new service later (e.g. Nextcloud):
+#     1. Create docker/nextcloud.yml
+#     2. Have it declare `networks: homelab: external: true name: homelab`
+#     3. Add a Caddy/NPM route pointing to `nextcloud:80`
+#     4. No changes needed to immich.yml or any other stack
+#
+# USAGE EXAMPLES
+#   Start Immich only:
+#     docker compose --env-file docker/.env \
+#       -f docker/core.yml -f docker/immich.yml up -d
+#
+#   Add Jellyfin later (Immich keeps running untouched):
+#     docker compose --env-file docker/.env \
+#       -f docker/core.yml -f docker/jellyfin.yml up -d
+#
+#   Tear down Immich without affecting other stacks:
+#     docker compose --env-file docker/.env \
+#       -f docker/core.yml -f docker/immich.yml down
+# =============================================================================
+
+networks:
+  homelab:
+    name: homelab
+    driver: bridge
+    # A /16 gives 65 534 host addresses — plenty for a growing homelab.
+    # Chosen to avoid collisions with typical LAN ranges (192.168.x.x, 10.x.x.x).
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# =============================================================================
+# REVERSE PROXY PLACEHOLDER
+# =============================================================================
+# When you're ready to add Caddy, create docker/proxy.yml alongside this file.
+# A minimal Caddy example that joins the homelab network:
+#
+# services:
+#   caddy:
+#     image: caddy:2-alpine
+#     container_name: caddy
+#     restart: unless-stopped
+#     ports:
+#       - "80:80"
+#       - "443:443"
+#       - "443:443/udp"   # HTTP/3
+#     volumes:
+#       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+#       - caddy_data:/data
+#       - caddy_config:/config
+#     networks:
+#       - homelab
+#
+# volumes:
+#   caddy_data:
+#     name: caddy_data
+#   caddy_config:
+#     name: caddy_config
+#
+# networks:
+#   homelab:
+#     external: true
+#     name: homelab
+#
+# Then in your Caddyfile:
+#   photos.yourdomain.com {
+#     reverse_proxy immich-server:2283
+#   }
+#   cloud.yourdomain.com {
+#     reverse_proxy nextcloud:80
+#   }
+#   media.yourdomain.com {
+#     reverse_proxy jellyfin:8096
+#   }
+# =============================================================================

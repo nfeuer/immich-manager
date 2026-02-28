@@ -8,7 +8,19 @@ server:
   log_level: "INFO"
 
 immich:
-  docker_compose_path: "/opt/immich"
+  # Path to the directory containing the compose files for your Immich stack.
+  # With the multi-file layout introduced in docker/, pass both files to
+  # any docker compose command run by this manager, e.g.:
+  #   docker compose --env-file docker/.env -f docker/core.yml -f docker/immich.yml <subcommand>
+  # Set docker_compose_files to the list of files in order, and
+  # docker_compose_dir to the directory that contains them.
+  docker_compose_dir: "/opt/homelab/docker"
+  docker_compose_files:
+    - "core.yml"
+    - "immich.yml"
+  # Immich HTTP API — reachable on the host via the 127.0.0.1:2283 binding
+  # in immich.yml. When a reverse proxy is added and that binding is removed,
+  # update this URL to point through the proxy instead.
   api_url: "http://localhost:2283/api"
   api_key: "${IMMICH_API_KEY:-}"  # Generate in Immich: Admin → API Keys. Use env var or paste directly.
 
