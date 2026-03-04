@@ -35,9 +35,15 @@ class StorageConfig(BaseModel):
 
 
 class EncryptionConfig(BaseModel):
-    """Encryption configuration for backups"""
+    """Encryption configuration for backups.
+    Uses 'age' for encryption (https://age-encryption.org/).
+    Install: sudo apt install age
+    Generate key: age-keygen -o /etc/immich-ecosystem/backup-key.txt
+    Set public_key to the public key from the output (starts with 'age1...').
+    Keep the private key file safe — it's needed to decrypt/restore backups.
+    """
     enabled: bool = False
-    public_key: str = ""
+    public_key: str = ""  # age public key (age1...)
 
 
 class BackupConfig(BaseModel):

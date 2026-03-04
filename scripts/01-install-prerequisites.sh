@@ -49,6 +49,7 @@ echo "  - Docker CE + Docker Compose plugin"
 echo "  - build-essential (for compiling Python packages)"
 echo "  - curl, jq, git, smartmontools"
 echo "  - UFW firewall, fail2ban"
+echo "  - Automatic security updates (unattended-upgrades)"
 echo ""
 read -p "Continue? (yes/no): " confirm
 [ "$confirm" == "yes" ] || exit 0
@@ -155,7 +156,38 @@ sudo apt-get install -y \
 echo -e "${GREEN}✓${NC} smartmontools, UFW, fail2ban installed"
 
 # ──────────────────────────────────────────────
-# 6. OpenCV system dependencies (for Photo Curator)
+# 6. Automatic security updates
+# ──────────────────────────────────────────────
+echo ""
+echo "Configuring automatic security updates..."
+sudo apt-get install -y unattended-upgrades apt-listchanges > /dev/null 2>&1
+
+# Enable unattended-upgrades with security-only policy
+sudo tee /etc/apt/apt.conf.d/50unattended-upgrades > /dev/null <<'UUEOF'
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+UUEOF
+
+# Enable the periodic timer
+sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<'AUEOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+AUEOF
+
+sudo systemctl enable unattended-upgrades 2>/dev/null || true
+echo -e "${GREEN}✓${NC} Automatic security updates enabled (security patches only, no auto-reboot)"
+
+# ──────────────────────────────────────────────
+# 7. OpenCV system dependencies (for Photo Curator)
 # ──────────────────────────────────────────────
 echo ""
 echo "Installing OpenCV dependencies..."
@@ -166,7 +198,7 @@ sudo apt-get install -y \
 echo -e "${GREEN}✓${NC} OpenCV dependencies installed"
 
 # ──────────────────────────────────────────────
-# 7. Create dedicated service user
+# 8. Create dedicated service user
 # ──────────────────────────────────────────────
 echo ""
 if id "immich-mgr" &>/dev/null; then
@@ -180,7 +212,7 @@ else
 fi
 
 # ──────────────────────────────────────────────
-# 8. Create directory structure
+# 9. Create directory structure
 # ──────────────────────────────────────────────
 echo ""
 echo "Creating directory structure..."
@@ -204,7 +236,7 @@ sudo chmod 750 /etc/immich-ecosystem
 echo -e "${GREEN}✓${NC} Directories created"
 
 # ──────────────────────────────────────────────
-# 9. Create secrets environment file template
+# 10. Create secrets environment file template
 # ──────────────────────────────────────────────
 echo ""
 if [ ! -f /etc/immich-ecosystem/secrets.env ]; then
@@ -239,7 +271,7 @@ else
 fi
 
 # ──────────────────────────────────────────────
-# 10. Install logrotate configuration
+# 11. Install logrotate configuration
 # ──────────────────────────────────────────────
 echo ""
 echo "Configuring log rotation..."
@@ -262,7 +294,7 @@ EOF
 echo -e "${GREEN}✓${NC} Log rotation configured"
 
 # ──────────────────────────────────────────────
-# 11. Persistent install state directory
+# 12. Persistent install state directory
 # ──────────────────────────────────────────────
 echo ""
 echo "Setting up persistent state tracking..."
@@ -283,6 +315,7 @@ echo "  ✓ Python $PYTHON_VERSION + pip + venv + dev headers"
 echo "  ✓ Docker CE + Compose plugin"
 echo "  ✓ build-essential, curl, jq, git"
 echo "  ✓ smartmontools, UFW, fail2ban"
+echo "  ✓ Automatic security updates (unattended-upgrades)"
 echo "  ✓ OpenCV system libraries"
 echo "  ✓ Service user 'immich-mgr'"
 echo "  ✓ Secrets file: /etc/immich-ecosystem/secrets.env"

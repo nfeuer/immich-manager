@@ -32,8 +32,13 @@ backup:
   retention_days: 30
   compression: true
   encryption:
-    enabled: false
-    public_key: ""
+    enabled: false  # Enable after generating a key (see below)
+    public_key: ""  # age public key (starts with "age1...")
+    # Setup:
+    #   sudo apt install age
+    #   age-keygen -o /etc/immich-ecosystem/backup-key.txt
+    #   Copy the public key from the output and paste it above.
+    #   Keep the key file safe — it's needed to restore encrypted backups.
 
 # Backup Verification System (Feature #12)
 backup_verification:

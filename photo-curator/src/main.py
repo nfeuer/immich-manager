@@ -57,6 +57,27 @@ app.add_middleware(
 )
 
 
+_ALLOWED_ORIGINS = [
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+    "http://localhost:2283",
+    "http://127.0.0.1:2283",
+]
+
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    """Block cross-origin state-changing requests (CSRF protection)."""
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            origin = request.headers.get("Origin") or request.headers.get("Referer", "")
+            if origin and not any(origin.startswith(o) for o in _ALLOWED_ORIGINS):
+                logger.warning("CSRF blocked: origin=%s", origin)
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin request blocked"})
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to every response."""
