@@ -1,236 +1,239 @@
-# Immich Complete Ecosystem
+# Immich Manager
 
 **Production-ready monitoring, backups, curation, and remote access for Immich**
 
-This project provides a complete, production-ready ecosystem around [Immich](https://immich.app), the self-hosted photo and video management solution. It adds essential features for running Immich in a family environment with 6+ users.
+https://houseoffeuer.com | Discord: House of Feuer
 
-## 🎯 What This Provides
+---
 
-### 📊 Immich Server Manager
-- **Disk Health Monitoring** - SMART data collection every 5 minutes
-- **Automated Backups** - Daily PostgreSQL dumps with 30-day retention
-- **Update Management** - Automated minor updates with rollback capability
-- **System Monitoring** - CPU, RAM, disk I/O metrics with historical data
-- **Alert System** - Email/webhook notifications for critical issues
-- **Web Dashboard** - Real-time metrics and manual controls
+## What This Provides
 
-### 📸 Photo Curator Assistant
-- **AI Quality Scoring** - Automatic photo quality assessment (local, no API costs)
-- **Monthly Curation** - Per-user reminders and curated albums
-- **Duplicate Detection** - Find and manage similar photos
-- **Year-End Collaboration** - Family photo book creation tools
+### Server Manager (port 8080)
+- Disk health monitoring (SMART), automated daily backups with optional **age encryption**
+- Prometheus-compatible `/metrics` endpoint, system metrics (CPU/RAM/disk/network)
+- Immich version update notifications, Docker container monitoring
+- Email, webhook, and **Discord** alerts (House of Feuer branding)
+- API rate limiting, audit log, structured JSON logging
+- Guided backup restore workflow (stop Immich, restore, restart)
+- Systemd watchdog heartbeats
 
-### 🌐 Remote Access
-- **Cloudflare Tunnel** - Secure access from anywhere, no port forwarding
-- **Automatic HTTPS** - Built-in SSL certificates
-- **DDoS Protection** - Cloudflare's edge network protection
+### Photo Curator (port 8081)
+- AI photo quality scoring (local models, no API costs)
+- Monthly curation reminders with per-user targets
+- Duplicate detection, Year in Review summary
+- Photo Map View (OpenStreetMap + Leaflet)
+- Family Mode: shared curation sessions with collaborator invites
+- Immich SSO authentication (no separate login)
 
-### 🔒 Security Hardening
-- **fail2ban** - Automatic brute force protection
-- **UFW Firewall** - Network access control
-- **2FA Support** - Two-factor authentication guidance
-- **Security Monitoring** - Continuous security status tracking
+### Remote Access
+- Cloudflare Tunnel (no port forwarding, automatic HTTPS, DDoS protection)
+- Multi-service routing: domain -> Immich, /monitor/ -> Server Manager, /curator/ -> Photo Curator
 
-## 💰 Cost
+### Security Hardening
+- fail2ban, UFW firewall, SSH hardening (key-only auth, root login disabled)
+- Automatic security updates (unattended-upgrades, security-only)
+- Services run as dedicated `immich-mgr` user with systemd sandboxing
+- CSRF protection, CSP headers, secrets in environment file (not config)
+- Backup encryption with [age](https://age-encryption.org/)
 
-**Total: $10-15/year**
-- Domain name: $10-15/year
-- Everything else: FREE (self-hosted)
+### Deployment
+- Automated deploy script with backup, selective service restart, and rollback
+- Schema migration system (no manual DB changes needed on update)
 
-## ⚡ Quick Start
+---
+
+## Quick Start (Clean Ubuntu Install)
 
 ### Prerequisites
-
-- Ubuntu/Debian Linux
-- Immich already installed and running
-- Python 3.9+
-- Docker and Docker Compose
+- Ubuntu 22.04+ or Debian 12+ (fresh install is fine)
+- Immich already installed and running ([install guide](https://immich.app/docs/install/docker-compose))
 - sudo access
+- A domain name pointed at Cloudflare (~$12/year) if you want remote access
 
-### Installation
+### Step 1: Clone and auto-install dependencies
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/immich-manager.git
+git clone https://github.com/nfeuer/immich-manager.git
 cd immich-manager
 
-# Run the installer
+# Auto-install everything: Docker, Python, fail2ban, etc.
+./scripts/01-install-prerequisites.sh
+```
+
+This installs: Python 3 + pip + venv, Docker CE + Compose, build-essential, curl, jq, git, smartmontools, UFW, fail2ban, unattended-upgrades, OpenCV system libs, and creates the `immich-mgr` service user.
+
+**If it tells you to log out** (for Docker group changes), do so, then continue.
+
+### Step 2: Edit secrets
+
+```bash
+sudo nano /etc/immich-ecosystem/secrets.env
+```
+
+Fill in at minimum:
+- `IMMICH_API_KEY` — generate in Immich: Admin -> API Keys
+- `SMTP_PASSWORD` — if you want email alerts
+- `DISCORD_WEBHOOK_URL` — if you want Discord notifications
+
+### Step 3: Run the installer
+
+```bash
 ./install.sh
 ```
 
-The installer will:
-1. Check prerequisites
-2. Install Server Manager (~10 minutes)
-3. Install Photo Curator (~15 minutes)
-4. Setup Remote Access (~15 minutes, requires domain)
-5. Apply Security Hardening (~5 minutes)
-6. Run comprehensive tests
+The installer walks you through 5 phases interactively (~30 minutes).
 
-## 📋 Detailed Installation
+---
 
-### Phase 0: Prerequisites Check
+## Manual Steps After Installation
 
-```bash
-./scripts/00-check-prerequisites.sh
-```
+These cannot be automated and **you must do them yourself**:
 
-Validates:
-- Operating system (Ubuntu/Debian)
-- Python 3.9+
-- Docker and Docker Compose
-- Immich installation
-- Disk space (10GB+ free)
-- Required ports (8080, 8081)
+### 1. Set up your SSH key (CRITICAL before exposing to the web)
 
-### Phase 1: Server Manager
+From your **local machine** (not the server):
 
 ```bash
-./scripts/10-install-server-manager.sh
+# Generate a key if you don't have one
+ssh-keygen -t ed25519
+
+# Copy it to the server
+ssh-copy-id youruser@server-ip
 ```
 
-Installs:
-- Python virtual environment
-- FastAPI application
-- SQLite database
-- systemd service
-- Web dashboard
-
-**Access:** http://localhost:8080
-
-**Configuration:** `/opt/immich-server-manager/config/config.yaml`
-
-### Phase 2: Photo Curator
+Then re-run the security hardening to fully disable password auth:
 
 ```bash
-./scripts/20-install-photo-curator.sh
+./scripts/40-security-hardening.sh --force
 ```
 
-Installs:
-- Photo curation engine
-- OpenCV and AI models
-- Web interface
-- systemd service
+Verify you can still SSH in with your key before closing your current session.
 
-**Access:** http://localhost:8081
+### 2. Enable 2FA for all Immich users (CRITICAL)
 
-**Configuration:** `/opt/photo-curator/config/config.yaml`
+1. Login to Immich as admin
+2. Go to **Admin -> Users**
+3. For each user: click user -> Settings -> Enable 2FA
+4. Each user sets up an authenticator app (Google Authenticator, Authy, etc.)
+5. **Save recovery codes** in a safe place
 
-### Phase 3: Remote Access
+### 3. Set up Cloudflare Access (recommended)
+
+This adds a zero-trust auth layer in front of the management dashboards:
+
+1. Go to https://one.dash.cloudflare.com/
+2. Navigate to **Access -> Applications -> Add an Application**
+3. Create a self-hosted app:
+   - Application domain: `yourdomain.com`, Path: `/monitor/*`
+   - Add another rule for: `yourdomain.com`, Path: `/curator/*`
+4. Set policy: "Allow" with email one-time pin (your email only)
+
+This means even if someone finds `/monitor/`, they hit a Cloudflare login wall before reaching the app.
+
+### 4. Enable backup encryption (recommended)
 
 ```bash
-./scripts/30-install-remote-access.sh
+# Install age encryption tool
+sudo apt install age
+
+# Generate a key pair
+sudo age-keygen -o /etc/immich-ecosystem/backup-key.txt
+
+# Note the public key from the output (starts with "age1...")
 ```
-
-**Requirements:**
-1. Domain name ($10-15/year from Porkbun, Namecheap, etc.)
-2. Free Cloudflare account
-3. Domain added to Cloudflare
-4. Nameservers updated
-
-Sets up:
-- Cloudflare Tunnel (cloudflared)
-- DNS records
-- Multi-service routing
-- Automatic reconnection
-
-**Access:**
-- `https://yourdomain.com` → Immich
-- `https://yourdomain.com/monitor/` → Server Manager
-- `https://yourdomain.com/curator/` → Photo Curator
-
-### Phase 4: Security Hardening
-
-```bash
-./scripts/40-security-hardening.sh
-```
-
-Configures:
-- fail2ban with Immich monitoring
-- UFW firewall rules
-- Security monitoring scripts
-- Security checklist
-
-### Phase 5: Testing
-
-```bash
-./scripts/50-test-installation.sh
-```
-
-Tests all components and generates comprehensive report.
-
-## 🔧 Configuration
-
-### Server Manager
 
 Edit `/opt/immich-server-manager/config/config.yaml`:
 
 ```yaml
-immich:
-  api_key: "your-api-key"  # Generate in Immich: Admin → API Keys
-
-storage:
-  data_drives:
-    - "/dev/sda"
-    - "/dev/sdb"
-
 backup:
-  enabled: true
-  local_path: "/mnt/backups/immich"
-  retention_days: 30
-
-alerts:
-  email:
+  encryption:
     enabled: true
-    smtp_host: "smtp.gmail.com"
-    smtp_port: 587
-    smtp_user: "your-email@gmail.com"
-    smtp_password: "your-app-password"
-    to:
-      - "admin@yourdomain.com"
+    public_key: "age1your-public-key-here"
 ```
 
-**Test email alerts:**
+**Keep `/etc/immich-ecosystem/backup-key.txt` safe** — without it, you cannot restore encrypted backups. Copy it to a secure location off-server.
+
+### 5. Configure alerts
+
+Edit `/opt/immich-server-manager/config/config.yaml` to set:
+- Email recipients (`alerts.email.to`)
+- Discord webhook URL (`alerts.discord.webhook_url`)
+- Alert thresholds (disk temp, disk space)
+
+Test:
+
 ```bash
 curl -X POST http://localhost:8080/api/test-alert
 ```
 
-### Photo Curator
-
-Edit `/opt/photo-curator/config/config.yaml`:
-
-```yaml
-immich:
-  api_key: "your-api-key"  # Same as Server Manager
-
-curation:
-  monthly_target: 50  # Photos to curate per month
-  reminder_day: 1     # Day of month for reminders
-```
-
-## 📊 Monitoring & Maintenance
-
-### Quick Health Check
+### 6. Review the security checklist
 
 ```bash
-./scripts/health-check.sh
+cat /opt/immich-ecosystem/security-checklist.txt
 ```
 
-Shows status of all services and recent backup.
+---
 
-### View Dashboards
+## Updating / Deploying Changes
 
-- **Server Manager:** http://localhost:8080
-  - System metrics
-  - Disk health
-  - Backup status
-  - Alert history
+After pulling new code from the repo:
 
-- **Photo Curator:** http://localhost:8081
-  - Photo quality scores
-  - Curation progress
-  - User activity
+```bash
+# Update everything with automatic backup
+sudo ./scripts/deploy.sh
 
-### Service Management
+# Update only one service
+sudo ./scripts/deploy.sh photo-curator
+
+# Roll back if something breaks
+sudo ./scripts/deploy.sh --rollback
+```
+
+The deploy script:
+1. Backs up databases before changing anything
+2. Pulls latest code from git
+3. Syncs files and installs new Python dependencies
+4. Restarts only the specified services (with health checks)
+5. Verifies database migrations applied
+6. Keeps 10 deploy backups for rollback
+
+---
+
+## Configuration Reference
+
+### Secrets (credentials)
+
+All secrets live in one file, readable only by root and the service user:
+
+```
+/etc/immich-ecosystem/secrets.env    (mode 640, root:immich-mgr)
+```
+
+Config files reference them with `${ENV_VAR}` or `${ENV_VAR:-default}` syntax.
+
+### Service configs
+
+| Service | Config file | Example |
+|---------|------------|---------|
+| Server Manager | `/opt/immich-server-manager/config/config.yaml` | `server-manager/config/config.yaml.example` |
+| Photo Curator | `/opt/photo-curator/config/config.yaml` | `photo-curator/config/config.yaml.example` |
+
+### Key directories
+
+| Path | Purpose |
+|------|---------|
+| `/etc/immich-ecosystem/secrets.env` | API keys, passwords |
+| `/etc/immich-ecosystem/backup-key.txt` | Backup encryption key |
+| `/opt/immich-server-manager/` | Server Manager install |
+| `/opt/photo-curator/` | Photo Curator install |
+| `/var/log/immich-ecosystem/` | Application logs (rotated daily, 30 days) |
+| `/var/lib/immich-ecosystem/` | Install state (persistent) |
+| `/mnt/backups/immich/` | Database backups |
+| `/etc/ssh/sshd_config.d/99-immich-hardening.conf` | SSH hardening config |
+
+---
+
+## Service Management
 
 ```bash
 # View logs
@@ -238,261 +241,219 @@ sudo journalctl -u immich-server-manager -f
 sudo journalctl -u photo-curator -f
 sudo journalctl -u cloudflared -f
 
-# Restart services
+# Restart
 sudo systemctl restart immich-server-manager
 sudo systemctl restart photo-curator
-sudo systemctl restart cloudflared
 
-# Check status
-sudo systemctl status immich-server-manager
-```
+# Health check
+./scripts/health-check.sh
 
-### Manual Backup
-
-```bash
-curl -X POST http://localhost:8080/api/backup/now
-```
-
-### Security Monitoring
-
-```bash
+# Security audit
 /opt/immich-ecosystem/scripts/security-monitor.sh
 ```
 
-Shows:
-- fail2ban bans
-- Recent login attempts
-- Firewall status
-- Service health
+---
 
-## 🔒 Security Best Practices
+## API Endpoints
 
-### Essential Steps
+### Server Manager (http://localhost:8080)
 
-1. **Enable 2FA for all users** (CRITICAL!)
-   - Login to Immich → Admin → Users
-   - Enable 2FA for each user
-   - Users must set up authenticator app on next login
+All endpoints except `/health` require Immich authentication (cookie or Bearer token).
 
-2. **Use strong passwords**
-   - Minimum 16 characters
-   - Use a password manager
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check (no auth) |
+| GET | `/api/status` | System status |
+| GET | `/api/disks` | Disk health (SMART) |
+| GET | `/api/metrics?hours=24` | Historical system metrics |
+| GET | `/api/backups` | Backup history |
+| POST | `/api/backup/now` | Trigger backup |
+| GET | `/api/alerts` | Alert history |
+| POST | `/api/test-alert` | Send test alert |
+| GET | `/metrics` | Prometheus metrics |
+| GET | `/api/audit` | Audit log |
+| GET | `/api/backups/available` | List restorable backups |
+| POST | `/api/restore` | Start guided restore |
+| GET | `/api/immich-update` | Check for Immich updates |
 
-3. **Regular updates**
-   ```bash
-   sudo apt update && sudo apt upgrade
-   ```
+### Photo Curator (http://localhost:8081)
 
-4. **Monitor alerts**
-   - Check email alerts regularly
-   - Review security logs weekly
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check (no auth) |
+| GET | `/` | Main curation UI |
+| GET | `/year-in-review` | Year in Review page |
+| GET | `/map` | Photo Map View |
+| GET | `/api/year-in-review/{year}` | Year in Review data |
+| GET | `/api/photos/map` | Photo locations |
+| POST | `/api/curation/{year}/{month}/share` | Invite collaborator |
+| GET | `/api/curation/{year}/{month}/collaborators` | List collaborators |
+| GET | `/api/shared-sessions` | Your shared sessions |
+| POST | `/api/curation/{year}/{month}/shared-pick` | Add shared pick |
 
-5. **Test backups**
-   - Verify backups are running
-   - Test restore procedure quarterly
+Full interactive API docs: http://localhost:8080/docs and http://localhost:8081/docs
 
-### Security Checklist
+---
 
-See `/opt/immich-ecosystem/security-checklist.txt` for complete checklist.
+## Security Architecture
 
-## 🔄 Backup & Restore
-
-### Backup
-
-Backups run automatically at 2 AM daily (configurable).
-
-**Backup location:** `/mnt/backups/immich/`
-
-**Manual backup:**
-```bash
-curl -X POST http://localhost:8080/api/backup/now
+```
+Internet
+    |
+    v
+[Cloudflare Edge] -- DDoS protection, HTTPS termination
+    |
+    v
+[Cloudflare Tunnel] -- outbound-only connection, no open ports
+    |
+    v
+[UFW Firewall] -- deny all incoming except SSH + local subnet
+    |
+    v
+[fail2ban] -- auto-ban after 5 failed SSH attempts
+    |
+    v
+[SSH] -- key-only auth, root login disabled, 3 max tries
+    |
+    v
+[systemd sandbox] -- immich-mgr user, ProtectSystem=strict,
+                      PrivateDevices, ProtectHome, RestrictNamespaces
+    |
+    v
+[FastAPI app] -- Immich SSO auth, CSRF protection, rate limiting,
+                  CSP headers, audit logging
+    |
+    v
+[Secrets] -- /etc/immich-ecosystem/secrets.env (640 root:immich-mgr)
 ```
 
-### Restore
+### What's automated
+- Security patches via unattended-upgrades (daily, security-only)
+- Log rotation (daily, 30 days, compressed)
+- fail2ban monitoring
+- Service watchdog (auto-restart on crash)
+
+### What requires manual action
+- SSH key setup (before disabling password auth)
+- Immich 2FA enrollment (per user)
+- Cloudflare Access policy (optional but recommended)
+- Backup encryption key generation
+- Periodic security checklist review
+
+---
+
+## Troubleshooting
+
+### Service won't start
 
 ```bash
-# List available backups
-ls -lh /mnt/backups/immich/
-
-# Restore database (example)
-BACKUP_FILE="/mnt/backups/immich/immich_db_20240101_020000.sql.gz"
-gunzip -c $BACKUP_FILE | docker exec -i immich_postgres psql -U postgres immich
+sudo journalctl -u immich-server-manager -n 50 --no-pager
+# or
+sudo journalctl -u photo-curator -n 50 --no-pager
 ```
 
-## 🚨 Troubleshooting
-
-### Server Manager won't start
+### Permission errors after deploy
 
 ```bash
-# Check logs
-sudo journalctl -u immich-server-manager -n 50
-
-# Verify configuration
-cat /opt/immich-server-manager/config/config.yaml
-
-# Test manually
-cd /opt/immich-server-manager
-source venv/bin/activate
-python -m src.main
+sudo chown -R immich-mgr:immich-mgr /opt/immich-server-manager
+sudo chown -R immich-mgr:immich-mgr /opt/photo-curator
 ```
 
-### Photo Curator errors
+### Can't SSH after security hardening
 
-```bash
-# Check OpenCV installation
-cd /opt/photo-curator
-source venv/bin/activate
-python -c "import cv2; print(cv2.__version__)"
-
-# Reinstall if needed
-pip install --force-reinstall opencv-python
-```
+If you're locked out (password auth was disabled before adding a key):
+1. Access the server via physical console or hosting provider's console
+2. Edit `/etc/ssh/sshd_config.d/99-immich-hardening.conf`
+3. Uncomment `PasswordAuthentication no` line
+4. Run `sudo systemctl restart ssh`
+5. Add your SSH key, then re-run `./scripts/40-security-hardening.sh --force`
 
 ### Remote access not working
 
 ```bash
-# Check tunnel status
 sudo systemctl status cloudflared
-
-# Check tunnel logs
 sudo journalctl -u cloudflared -n 100
-
-# Test DNS
 dig yourdomain.com
-
-# Verify local services are running
-curl http://localhost:2283/api/server-info
 ```
 
-### Port already in use
+### Backup restore
 
 ```bash
-# Find what's using the port
-sudo lsof -i :8080
+# List available backups
+curl http://localhost:8080/api/backups/available
 
-# Change port in config
-nano /opt/immich-server-manager/config/config.yaml
-# Then restart: sudo systemctl restart immich-server-manager
+# Trigger guided restore via API
+curl -X POST http://localhost:8080/api/restore -d '{"backup_file": "/mnt/backups/immich/immich_db_20240101_020000.sql.gz"}'
 ```
 
-### Disk health monitoring not working
-
-```bash
-# Install smartmontools
-sudo apt install smartmontools
-
-# Test manually
-sudo smartctl -a /dev/sda
-
-# Check if drives are detected
-lsblk
-```
-
-## 📁 Project Structure
-
-```
-immich-manager/
-├── install.sh                  # Master installation script
-├── README.md                   # This file
-│
-├── scripts/
-│   ├── lib/
-│   │   └── state-manager.sh   # Installation state tracking
-│   ├── systemd/                # Service files
-│   ├── 00-check-prerequisites.sh
-│   ├── 10-install-server-manager.sh
-│   ├── 20-install-photo-curator.sh
-│   ├── 30-install-remote-access.sh
-│   ├── 40-security-hardening.sh
-│   ├── 50-test-installation.sh
-│   └── health-check.sh
-│
-├── server-manager/
-│   ├── src/                    # Python application
-│   ├── config/                 # Configuration templates
-│   ├── static/                 # Web dashboard
-│   └── requirements.txt
-│
-└── photo-curator/
-    ├── src/                    # Python application
-    ├── config/                 # Configuration templates
-    ├── static/                 # Web interface
-    └── requirements.txt
-```
-
-## 🔗 API Documentation
-
-### Server Manager API
-
-**Base URL:** http://localhost:8080
-
-- `GET /health` - Health check
-- `GET /api/status` - System status
-- `GET /api/disks` - Disk health
-- `GET /api/metrics?hours=24` - System metrics
-- `GET /api/backups` - Backup history
-- `POST /api/backup/now` - Trigger backup
-- `GET /api/alerts` - Get alerts
-- `POST /api/test-alert` - Send test alert
-
-### Photo Curator API
-
-**Base URL:** http://localhost:8081
-
-- `GET /health` - Health check
-- `GET /api/status` - Curator status
-- `GET /api/users` - List users
-- `GET /api/photos/{user_id}/monthly` - Monthly photos
-- `POST /api/curate/{user_id}` - Curate photos
-
-**Full API docs:** http://localhost:8080/docs and http://localhost:8081/docs
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
-## 🙏 Acknowledgments
-
-- [Immich](https://immich.app) - The amazing self-hosted photo management solution
-- [Cloudflare](https://cloudflare.com) - Free tunneling and DDoS protection
-- [FastAPI](https://fastapi.tiangolo.com) - Modern Python web framework
-
-## 📞 Support
-
-- **Issues:** Open an issue on GitHub
-- **Immich Discord:** https://discord.immich.app
-- **Immich Docs:** https://immich.app/docs
-
-## 🗺️ Roadmap
-
-- [ ] Mobile app for Photo Curator
-- [ ] Advanced AI features (face recognition, scene detection)
-- [ ] Multi-site backup support (S3, Backblaze)
-- [ ] Email digest reports
-- [ ] Telegram/Discord bot integration
-- [ ] Photo book export to Shutterfly/Mixbook
-- [ ] Prometheus/Grafana integration
-
-## 📊 Stats
-
-- **Installation time:** 30-60 minutes
-- **Disk space required:** ~500MB (without photos)
-- **Memory usage:** ~200MB (combined services)
-- **CPU usage:** <5% idle, ~20% during backups
-- **Supported users:** 6-20+ (tested with families)
+For encrypted backups, ensure `/etc/immich-ecosystem/backup-key.txt` is present on the server.
 
 ---
 
-**Made with ❤️ for the Immich community**
+## Project Structure
 
-Star ⭐ this repo if you find it useful!
+```
+immich-manager/
+├── install.sh                          # Master installer (interactive)
+├── README.md
+├── scripts/
+│   ├── 00-check-prerequisites.sh       # Validate requirements
+│   ├── 01-install-prerequisites.sh     # Auto-install all dependencies
+│   ├── 10-install-server-manager.sh    # Install server manager
+│   ├── 20-install-photo-curator.sh     # Install photo curator
+│   ├── 30-install-remote-access.sh     # Cloudflare Tunnel setup
+│   ├── 40-security-hardening.sh        # SSH, fail2ban, UFW, checklist
+│   ├── 50-test-installation.sh         # Post-install verification
+│   ├── deploy.sh                       # Automated update/rollback
+│   ├── health-check.sh                 # Quick health check
+│   ├── lib/state-manager.sh            # Install state tracking
+│   └── systemd/                        # Service unit files
+├── server-manager/
+│   ├── src/
+│   │   ├── main.py                     # FastAPI app, all endpoints
+│   │   ├── config.py                   # Pydantic config with env var support
+│   │   ├── database.py                 # SQLite + migration system
+│   │   ├── monitoring.py               # Disk, system, Docker monitoring
+│   │   ├── backup.py                   # Backup + age encryption
+│   │   ├── backup_verifier.py          # Backup integrity verification
+│   │   ├── alerts.py                   # Email, webhook, Discord alerts
+│   │   ├── update_checker.py           # Immich version checker
+│   │   ├── prometheus.py               # Prometheus metrics exposition
+│   │   ├── audit.py                    # Audit log
+│   │   └── logging_config.py           # Structured JSON logging
+│   ├── config/config.yaml.example
+│   └── requirements.txt
+├── photo-curator/
+│   ├── src/
+│   │   ├── main.py                     # FastAPI app, curation + map + family mode
+│   │   ├── database.py                 # SQLite + migrations + shared curation
+│   │   ├── auth.py                     # Immich SSO integration
+│   │   ├── immich_client.py            # Immich API client
+│   │   ├── analyzer.py                 # AI photo scoring
+│   │   ├── notifications.py            # Email notifications
+│   │   └── logging_config.py           # Structured JSON logging
+│   ├── config/config.yaml.example
+│   └── requirements.txt
+├── migration-tools/                    # Database migration utilities
+└── health-monitor/                     # Standalone health monitor
+```
+
+---
+
+## Cost
+
+**Total: ~$12/year** (domain name only). Everything else is free and self-hosted.
+
+---
+
+## Support
+
+- **Website:** https://houseoffeuer.com
+- **Discord:** House of Feuer
+- **Immich Docs:** https://immich.app/docs
+
+---
+
+## License
+
+MIT License - See LICENSE file for details.
