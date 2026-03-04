@@ -32,10 +32,11 @@ echo "Creating installation directory..."
 mark_step_start "phase1_server_manager" "create_directory"
 
 sudo mkdir -p /opt/immich-server-manager
-sudo chown $USER:$USER /opt/immich-server-manager
+sudo chown immich-mgr:immich-mgr /opt/immich-server-manager
 
 # Copy source files
-cp -r "$SCRIPT_DIR/../server-manager/"* /opt/immich-server-manager/
+sudo cp -r "$SCRIPT_DIR/../server-manager/"* /opt/immich-server-manager/
+sudo chown -R immich-mgr:immich-mgr /opt/immich-server-manager
 
 mark_step_complete "phase1_server_manager" "create_directory"
 echo -e "${GREEN}✓${NC} Directory created"
@@ -48,7 +49,7 @@ mark_step_start "phase1_server_manager" "create_venv"
 cd /opt/immich-server-manager
 
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
+    sudo -u immich-mgr python3 -m venv venv
 fi
 
 source venv/bin/activate
@@ -103,8 +104,8 @@ echo ""
 echo "Initializing database..."
 mark_step_start "phase1_server_manager" "init_database"
 
-mkdir -p data
-python -c "from src.database import Database; Database('data/server-manager.db')"
+sudo -u immich-mgr mkdir -p data
+sudo -u immich-mgr venv/bin/python -c "from src.database import Database; Database('data/server-manager.db')"
 
 mark_step_complete "phase1_server_manager" "init_database"
 echo -e "${GREEN}✓${NC} Database initialized"

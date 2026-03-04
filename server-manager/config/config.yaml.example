@@ -1,5 +1,9 @@
 # Immich Server Manager Configuration
 # https://houseoffeuer.com  |  Discord: House of Feuer
+#
+# Secrets (API keys, passwords) are loaded from environment variables.
+# Set them in: /etc/immich-ecosystem/secrets.env
+# The systemd service reads that file via EnvironmentFile=.
 
 server:
   host: "127.0.0.1"  # Use "0.0.0.0" only if you need LAN access and have a reverse proxy/firewall

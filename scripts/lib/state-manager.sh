@@ -4,7 +4,13 @@
 # Tracks progress of multi-phase installation for idempotency and resumability
 #
 
-STATE_FILE="${STATE_FILE:-/tmp/.immich-install-state.json}"
+STATE_DIR="/var/lib/immich-ecosystem"
+# Use persistent directory if available, fall back to /tmp for first run
+if [ -d "$STATE_DIR" ] && [ -w "$STATE_DIR" ]; then
+    STATE_FILE="${STATE_FILE:-$STATE_DIR/install-state.json}"
+else
+    STATE_FILE="${STATE_FILE:-/tmp/.immich-install-state.json}"
+fi
 
 # Initialize state file if it doesn't exist
 _init_state() {

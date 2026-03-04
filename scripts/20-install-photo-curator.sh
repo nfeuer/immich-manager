@@ -31,9 +31,10 @@ echo "Creating installation directory..."
 mark_step_start "phase2_photo_curator" "create_directory"
 
 sudo mkdir -p /opt/photo-curator
-sudo chown $USER:$USER /opt/photo-curator
+sudo chown immich-mgr:immich-mgr /opt/photo-curator
 
-cp -r "$SCRIPT_DIR/../photo-curator/"* /opt/photo-curator/
+sudo cp -r "$SCRIPT_DIR/../photo-curator/"* /opt/photo-curator/
+sudo chown -R immich-mgr:immich-mgr /opt/photo-curator
 
 mark_step_complete "phase2_photo_curator" "create_directory"
 echo -e "${GREEN}✓${NC} Directory created"
@@ -46,7 +47,7 @@ mark_step_start "phase2_photo_curator" "create_venv"
 cd /opt/photo-curator
 
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
+    sudo -u immich-mgr python3 -m venv venv
 fi
 
 source venv/bin/activate

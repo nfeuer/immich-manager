@@ -15,7 +15,8 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "╔════════════════════════════════════════╗"
-echo "║   Immich Ecosystem Installer v1.0.0   ║"
+echo "║   Immich Ecosystem Installer v1.1.0   ║"
+echo "║   https://houseoffeuer.com            ║"
 echo "╚════════════════════════════════════════╝"
 echo ""
 
@@ -65,19 +66,46 @@ if [ "$confirm" != "yes" ]; then
     exit 0
 fi
 
-# Phase 0: Prerequisites
+# Phase 0a: Auto-install prerequisites if needed
 echo ""
 echo "═══════════════════════════════════════════"
-echo " Phase 0: Checking Prerequisites"
+echo " Phase 0: Prerequisites"
 echo "═══════════════════════════════════════════"
 echo ""
 
+# Quick check: are the basics present?
+MISSING_PREREQS=false
+command -v python3 &>/dev/null || MISSING_PREREQS=true
+command -v docker &>/dev/null  || MISSING_PREREQS=true
+command -v curl &>/dev/null    || MISSING_PREREQS=true
+id "immich-mgr" &>/dev/null   || MISSING_PREREQS=true
+
+if [ "$MISSING_PREREQS" = true ]; then
+    echo "Some prerequisites are missing."
+    echo ""
+    read -p "Auto-install all prerequisites? (yes/no): " auto_install
+    if [ "$auto_install" == "yes" ]; then
+        $SCRIPT_DIR/scripts/01-install-prerequisites.sh
+        if [ $? -ne 0 ]; then
+            echo ""
+            echo -e "${RED}✗ Prerequisites installation failed${NC}"
+            exit 1
+        fi
+    else
+        echo ""
+        echo "Skipping auto-install. Running validation check instead..."
+    fi
+fi
+
+# Phase 0b: Validate prerequisites
+echo ""
 $SCRIPT_DIR/scripts/00-check-prerequisites.sh
 
 if [ $? -ne 0 ]; then
     echo ""
     echo -e "${RED}✗ Prerequisites check failed${NC}"
-    echo "Please fix the issues above and rerun this script"
+    echo "Run: $SCRIPT_DIR/scripts/01-install-prerequisites.sh"
+    echo "Then rerun this script."
     exit 1
 fi
 
@@ -194,9 +222,10 @@ echo ""
 echo "  1. 🔒 Enable 2FA for all Immich users (CRITICAL!)"
 echo "     Login to Immich → Admin → Users → Enable 2FA"
 echo ""
-echo "  2. 📧 Configure email alerts"
-echo "     Edit: /opt/immich-server-manager/config/config.yaml"
-echo "     Test: curl -X POST http://localhost:8080/api/test-alert"
+echo "  2. 📧 Configure secrets and alerts"
+echo "     Secrets: sudo nano /etc/immich-ecosystem/secrets.env"
+echo "     Config:  /opt/immich-server-manager/config/config.yaml"
+echo "     Test:    curl -X POST http://localhost:8080/api/test-alert"
 echo ""
 echo "  3. ✅ Review security checklist"
 echo "     View: /opt/immich-ecosystem/security-checklist.txt"
@@ -216,6 +245,7 @@ echo "  • Security:          /opt/immich-ecosystem/security-checklist.txt"
 echo "  • Remote access:     /opt/immich-ecosystem/remote-access-info.txt"
 echo ""
 echo "Need help? Check the documentation or visit:"
-echo "  • Immich Discord: https://discord.immich.app"
-echo "  • Immich Docs:    https://immich.app/docs"
+echo "  • House of Feuer:  https://houseoffeuer.com"
+echo "  • Discord:         House of Feuer"
+echo "  • Immich Docs:     https://immich.app/docs"
 echo ""
