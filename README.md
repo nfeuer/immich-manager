@@ -475,13 +475,47 @@ MIT License - See LICENSE file for details
 
 ## 🗺️ Roadmap
 
-- [ ] Mobile app for Photo Curator
-- [ ] Advanced AI features (face recognition, scene detection)
-- [ ] Multi-site backup support (S3, Backblaze)
-- [ ] Email digest reports
-- [ ] Telegram/Discord bot integration
-- [ ] Photo book export to Shutterfly/Mixbook
-- [ ] Prometheus/Grafana integration
+> **Effort scale:** XS (<1 day) | S (1–3 days) | M (3–7 days) | L (1–3 weeks) | XL (1+ months)
+
+### ✅ Completed
+- [x] Multi-site backup support (S3, Backblaze)
+- [x] Prometheus metrics endpoint
+
+### 🔄 In Progress
+- [~] Prometheus/Grafana integration — Prometheus done; Grafana dashboard config needed *(Effort: XS)*
+- [~] Telegram/Discord bot integration — Discord webhook alerts done; Telegram + interactive bot commands needed *(Effort: S–M)*
+- [~] Advanced AI features — Basic face detection done; face recognition + scene detection needed *(Effort: M–L)*
+
+### 📋 Planned
+
+#### Storage & Performance
+- [ ] Per-user storage quotas — limits, warnings, and upload blocking per user *(Effort: M)*
+- [ ] Video transcoding/compression — automated format conversion and size reduction *(Effort: M)*
+- [ ] Smart cleanup assistant — surface old/low-quality photos for bulk deletion with space savings preview *(Effort: M)*
+
+#### User & Access Management
+- [ ] User onboarding flow — invite family members via email, auto-create Immich accounts *(Effort: M)*
+- [ ] Guest access links — temporary expiring share links for non-Immich users *(Effort: S)*
+- [ ] Role management — admin, family member, and guest permission tiers *(Effort: L)*
+
+#### Automation & Intelligence
+- [ ] Smart album rules engine — auto-populate albums by date, location, quality score, or face tags *(Effort: L)*
+- [ ] Trip/event detection — cluster photos into trips using GPS + time gap analysis *(Effort: M)*
+- [ ] "On this day" digest emails — photos from this date in past years *(Effort: S)*
+
+#### Import & Export
+- [ ] Additional import sources — Apple Photos, Facebook, Instagram, OneDrive *(Effort: L)*
+- [ ] Photo book PDF export — generate printable PDF locally for upload to any print service *(Effort: L)*
+
+#### Ops & Reliability
+- [ ] Immich auto-updater — watch for new releases, apply minor updates, snapshot + rollback *(Effort: M)*
+- [ ] Self-update for immich-manager — git pull + restart workflow to keep manager current *(Effort: S)*
+
+#### Notifications & Reporting
+- [ ] Email digest reports — weekly/monthly system health and curation stats summaries *(Effort: S)*
+
+#### Mobile
+- [ ] Mobile app for Photo Curator *(Effort: XL)*
 
 ## 📊 Stats
 
