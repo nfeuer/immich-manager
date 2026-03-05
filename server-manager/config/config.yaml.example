@@ -78,6 +78,9 @@ thresholds:
   disk_space_warning: 85
   disk_space_critical: 95
 
+auth:
+  default_role: "user"  # Role assigned to new users: "admin", "user", or "guest"
+
 alerts:
   email:
     enabled: true

@@ -39,6 +39,55 @@ MIGRATIONS: List[tuple] = [
             UNIQUE(owner_id, year, month, contributor_id, asset_id)
         )""",
     ]),
+    # Version 3: users table for RBAC + album sharing with token-based guest links
+    (3, "add users and album sharing tables", [
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            immich_user_id TEXT NOT NULL UNIQUE,
+            email TEXT,
+            name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_users_immich_id ON users(immich_user_id)",
+        """CREATE TABLE IF NOT EXISTS album_shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            share_token TEXT NOT NULL UNIQUE,
+            shared_with_user_id TEXT,
+            guest_label TEXT,
+            can_add_photos BOOLEAN DEFAULT 0,
+            expires_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            revoked BOOLEAN DEFAULT 0
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_album_shares_token ON album_shares(share_token)",
+        "CREATE INDEX IF NOT EXISTS idx_album_shares_album ON album_shares(album_id)",
+        "CREATE INDEX IF NOT EXISTS idx_album_shares_user ON album_shares(shared_with_user_id)",
+        """CREATE TABLE IF NOT EXISTS album_contributions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            share_id INTEGER NOT NULL,
+            contributor_name TEXT NOT NULL,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(album_id, asset_id),
+            FOREIGN KEY (share_id) REFERENCES album_shares(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_contributions_album ON album_contributions(album_id)",
+        "CREATE INDEX IF NOT EXISTS idx_contributions_share ON album_contributions(share_id)",
+        """CREATE TABLE IF NOT EXISTS share_access_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            share_id INTEGER NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (share_id) REFERENCES album_shares(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_access_log_share ON share_access_log(share_id)",
+    ]),
 ]
 
 
@@ -744,4 +793,192 @@ class Database:
                 WHERE owner_id = ? AND year = ? AND month = ?
                 ORDER BY added_at
             """, (owner_id, year, month))
+            return [dict(r) for r in cursor.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Album sharing (token-based guest links + user shares)
+    # ------------------------------------------------------------------
+
+    def create_share(
+        self,
+        album_id: str,
+        owner_id: str,
+        shared_with_user_id: Optional[str] = None,
+        guest_label: Optional[str] = None,
+        can_add_photos: bool = False,
+        expires_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a share link for an album.
+
+        For user shares, *shared_with_user_id* is set and *expires_at*
+        is forced to NULL.  For guest links, a token-based URL is
+        generated.
+        """
+        import secrets
+        token = secrets.token_urlsafe(32)
+
+        # User shares never expire
+        if shared_with_user_id:
+            expires_at = None
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO album_shares
+                    (album_id, owner_id, share_token, shared_with_user_id,
+                     guest_label, can_add_photos, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (album_id, owner_id, token, shared_with_user_id,
+                  guest_label, can_add_photos, expires_at))
+            return {
+                "id": cursor.lastrowid,
+                "album_id": album_id,
+                "owner_id": owner_id,
+                "share_token": token,
+                "shared_with_user_id": shared_with_user_id,
+                "guest_label": guest_label,
+                "can_add_photos": can_add_photos,
+                "expires_at": expires_at,
+                "revoked": False,
+            }
+
+    def get_share_by_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Look up a share by token.  Returns None if revoked or expired."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM album_shares
+                WHERE share_token = ?
+                  AND revoked = 0
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            """, (token,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def revoke_share(self, share_id: int, owner_id: str) -> bool:
+        """Revoke a share (soft-delete).  Only the owner can revoke."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE album_shares SET revoked = 1 WHERE id = ? AND owner_id = ?",
+                (share_id, owner_id),
+            )
+            return cursor.rowcount > 0
+
+    def get_album_shares(self, album_id: str) -> List[Dict[str, Any]]:
+        """Get all shares for an album (including revoked, for admin view)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM album_shares WHERE album_id = ? ORDER BY created_at",
+                (album_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_shared_albums_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get active (non-expired, non-revoked) shares for an Immich user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM album_shares
+                WHERE shared_with_user_id = ?
+                  AND revoked = 0
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                ORDER BY created_at DESC
+            """, (user_id,))
+            return [dict(r) for r in cursor.fetchall()]
+
+    def update_share(
+        self,
+        share_id: int,
+        owner_id: str,
+        can_add_photos: Optional[bool] = None,
+        expires_at: Optional[str] = None,
+    ) -> bool:
+        """Update share settings.  Only the owner can update."""
+        updates = []
+        params: list = []
+        if can_add_photos is not None:
+            updates.append("can_add_photos = ?")
+            params.append(can_add_photos)
+        if expires_at is not None:
+            updates.append("expires_at = ?")
+            params.append(expires_at)
+        if not updates:
+            return False
+        params.extend([share_id, owner_id])
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE album_shares SET {', '.join(updates)} "
+                "WHERE id = ? AND owner_id = ?",
+                params,
+            )
+            return cursor.rowcount > 0
+
+    def add_contribution(
+        self, album_id: str, asset_id: str, share_id: int, contributor_name: str
+    ):
+        """Record a photo contribution to a shared album."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("""
+                INSERT OR IGNORE INTO album_contributions
+                    (album_id, asset_id, share_id, contributor_name)
+                VALUES (?, ?, ?, ?)
+            """, (album_id, asset_id, share_id, contributor_name))
+
+    def get_contributions(self, album_id: str) -> List[Dict[str, Any]]:
+        """Get all contributions for an album with contributor info."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT c.id, c.album_id, c.asset_id, c.share_id,
+                       c.contributor_name, c.added_at,
+                       s.guest_label, s.shared_with_user_id
+                FROM album_contributions c
+                JOIN album_shares s ON c.share_id = s.id
+                WHERE c.album_id = ?
+                ORDER BY c.added_at
+            """, (album_id,))
+            return [dict(r) for r in cursor.fetchall()]
+
+    def delete_contribution(self, album_id: str, asset_id: str, share_id: int) -> bool:
+        """Delete a contribution.  Only the contributor (by share_id) can delete."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM album_contributions "
+                "WHERE album_id = ? AND asset_id = ? AND share_id = ?",
+                (album_id, asset_id, share_id),
+            )
+            return cursor.rowcount > 0
+
+    def delete_contribution_as_owner(self, contribution_id: int, album_id: str) -> bool:
+        """Delete any contribution (for album owner / admin)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM album_contributions WHERE id = ? AND album_id = ?",
+                (contribution_id, album_id),
+            )
+            return cursor.rowcount > 0
+
+    def log_share_access(self, share_id: int, ip_address: str, user_agent: str):
+        """Record an access to a share link for auditing."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "INSERT INTO share_access_log (share_id, ip_address, user_agent) "
+                "VALUES (?, ?, ?)",
+                (share_id, ip_address, user_agent),
+            )
+
+    def get_share_access_log(self, share_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get access log for a share."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM share_access_log WHERE share_id = ? "
+                "ORDER BY accessed_at DESC LIMIT ?",
+                (share_id, limit),
+            )
             return [dict(r) for r in cursor.fetchall()]

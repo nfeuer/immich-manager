@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 MIGRATIONS: List[tuple] = [
     # Version 1: initial schema (already created by _init_db for fresh installs)
     (1, "initial schema", []),
+    # Version 2: users table for RBAC
+    (2, "add users table for RBAC", [
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            immich_user_id TEXT NOT NULL UNIQUE,
+            email TEXT,
+            name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_users_immich_id ON users(immich_user_id)",
+    ]),
 ]
 
 
