@@ -531,10 +531,10 @@ MIT License - See LICENSE file for details
 - [x] Prometheus metrics endpoint
 - [x] Immich auto-updater — watches for new releases, applies patch updates, snapshot + rollback *(Effort: M)*
 - [x] Discord webhook alerts — rich embeds with severity colours, quiet hours, all system events *(Effort: S)*
+- [x] Advanced AI features — face recognition (128-dim dlib embeddings, greedy identity clustering, user labelling + merge) and scene detection (MobileNetV2-Places365, 10 super-categories) *(Effort: M–L)*
 
 ### 🔄 In Progress
 - [~] Prometheus/Grafana integration — Prometheus done; Grafana dashboard config needed *(Effort: XS)*
-- [~] Advanced AI features — Basic face detection done; face recognition + scene detection needed *(Effort: M–L)*
 
 ### 📋 Planned
 
