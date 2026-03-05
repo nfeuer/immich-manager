@@ -17,6 +17,10 @@ immich:
   # Users authenticate via Immich SSO, so this is only for system tasks
   api_key: "${IMMICH_API_KEY:-}"  # Same as Server Manager (optional). Use env var or paste directly.
 
+auth:
+  default_role: "user"                  # Role for new Immich users: "admin", "user", or "guest"
+  guest_link_default_expiry_days: 30    # Default expiration for guest share links (0 = no expiry)
+
 ai:
   use_local_models: true
   model_path: "models/"

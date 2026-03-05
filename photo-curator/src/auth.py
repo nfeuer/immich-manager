@@ -3,11 +3,17 @@ Authentication middleware for Photo Curator
 Integrates with Immich's authentication system
 """
 
+import sys
+from pathlib import Path
 from fastapi import Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 from typing import Optional, Dict, Any
 import requests
 import logging
+
+# Add project root to path for shared library
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from shared.auth import get_or_create_user, Role
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +133,14 @@ async def get_current_user(
             }
         )
 
+    # Attach local user with role to request state
+    db = getattr(request.app.state, "database", None)
+    if db:
+        default_role = getattr(request.app.state, "default_role", "user")
+        local_user, _created = get_or_create_user(db, user, default_role)
+        request.state._local_user = local_user
+        user["_local_user"] = local_user
+
     return user
 
 
@@ -148,7 +162,15 @@ async def get_current_user_optional(
     if immich_auth is None:
         immich_auth = request.app.state.immich_auth
 
-    return immich_auth.get_user_from_request(request)
+    user = immich_auth.get_user_from_request(request)
+    if user:
+        db = getattr(request.app.state, "database", None)
+        if db:
+            default_role = getattr(request.app.state, "default_role", "user")
+            local_user, _created = get_or_create_user(db, user, default_role)
+            request.state._local_user = local_user
+            user["_local_user"] = local_user
+    return user
 
 
 class ImmichAPIClient:

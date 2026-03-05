@@ -2,6 +2,7 @@
 Main FastAPI application for Immich Server Manager
 """
 
+import sys
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +22,9 @@ import requests as http_requests
 import logging
 import sdnotify
 
+# Add project root to path for shared library
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 from .config import load_config, Config
 from .database import Database
 from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
@@ -30,6 +34,10 @@ from .update_checker import UpdateChecker
 from .prometheus import generate_metrics
 from .audit import ensure_audit_table, record_audit, get_audit_log
 from .logging_config import setup_json_logging
+from shared.auth import (
+    Role, ensure_users_table, get_or_create_user, require_role,
+    get_all_users, update_user_role, extract_token, validate_immich_token,
+)
 
 setup_json_logging()
 logger = logging.getLogger(__name__)
@@ -91,47 +99,43 @@ async def add_security_headers(request: Request, call_next):
 
 async def require_auth(request: Request) -> Dict[str, Any]:
     """
-    Dependency that validates the request against Immich's auth system.
-    Accepts either:
-      - Cookie: immich_access_token
-      - Header: Authorization: Bearer <token>
+    Dependency that validates the request against Immich's auth system
+    and attaches the local user (with role) to request state.
     """
-    access_token = request.cookies.get("immich_access_token")
-    if not access_token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            access_token = auth_header[7:]
-
-    if not access_token:
+    token = extract_token(request)
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # Validate with Immich
     immich_api_url = getattr(request.app.state, "immich_api_url", None)
     if not immich_api_url:
         raise HTTPException(status_code=503, detail="Immich API URL not configured")
 
-    try:
-        resp = http_requests.get(
-            f"{immich_api_url}/auth/validateToken",
-            headers={"Authorization": f"Bearer {access_token}"},
-            timeout=5,
-        )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid or expired token")
+    immich_user = validate_immich_token(immich_api_url, token)
+    if not immich_user:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-        user_resp = http_requests.get(
-            f"{immich_api_url}/users/me",
-            headers={"Authorization": f"Bearer {access_token}"},
-            timeout=5,
-        )
-        if user_resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Could not fetch user info")
+    # Look up / create local user with role
+    default_role = getattr(request.app.state, "default_role", "user")
+    local_user, created = get_or_create_user(database, immich_user, default_role)
 
-        return user_resp.json()
+    if created and database:
+        record_audit(database, "user_created",
+                     user_id=immich_user.get("id"),
+                     details=f"role={local_user['role']} bootstrap={local_user['role'] == 'admin'}",
+                     ip_address=request.client.host if request.client else None)
 
-    except http_requests.RequestException as e:
-        logger.error(f"Auth validation error: {e}")
-        raise HTTPException(status_code=502, detail="Could not reach Immich for auth validation")
+    request.state._local_user = local_user
+    immich_user["_local_user"] = local_user
+    return immich_user
+
+
+async def require_admin(request: Request) -> Dict[str, Any]:
+    """Dependency that requires admin role. Server Manager is admin-only."""
+    user = await require_auth(request)
+    local_user = user.get("_local_user", {})
+    if Role[local_user.get("role", "guest").upper()] < Role.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 # Global state
 config: Optional[Config] = None
@@ -158,6 +162,7 @@ async def startup_event():
         # Initialize database
         database = Database()
         ensure_audit_table(database)
+        ensure_users_table(database)
 
         # Initialize monitors
         all_drives = config.storage.data_drives + config.storage.parity_drives
@@ -176,6 +181,7 @@ async def startup_event():
 
         # Store Immich API URL for auth validation
         app.state.immich_api_url = config.immich.api_url
+        app.state.default_role = config.auth.default_role
 
         # Initialize scheduler
         scheduler = AsyncIOScheduler()
@@ -402,8 +408,8 @@ async def check_immich_update_job():
 
 # API Endpoints
 @app.get("/", response_class=HTMLResponse)
-async def root():
-    """Serve dashboard HTML"""
+async def root(request: Request, user: Dict = Depends(require_admin)):
+    """Serve dashboard HTML (admin only)"""
     dashboard_path = Path(__file__).parent.parent / "static" / "dashboard.html"
     if dashboard_path.exists():
         return dashboard_path.read_text()
@@ -429,7 +435,7 @@ async def health_check(request: Request):
 
 @app.get("/api/status")
 @limiter.limit("30/minute")
-async def get_status(request: Request, user: Dict = Depends(require_auth)):
+async def get_status(request: Request, user: Dict = Depends(require_admin)):
     """Get overall system status"""
     if not system_monitor or not docker_monitor:
         raise HTTPException(status_code=503, detail="Monitors not initialized")
@@ -444,7 +450,7 @@ async def get_status(request: Request, user: Dict = Depends(require_auth)):
 
 @app.get("/api/disks")
 @limiter.limit("30/minute")
-async def get_disk_health(request: Request, user: Dict = Depends(require_auth)):
+async def get_disk_health(request: Request, user: Dict = Depends(require_admin)):
     """Get current disk health"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -457,7 +463,7 @@ async def get_disk_health(request: Request, user: Dict = Depends(require_auth)):
 
 @app.get("/api/metrics")
 @limiter.limit("30/minute")
-async def get_metrics(request: Request, hours: int = 24, user: Dict = Depends(require_auth)):
+async def get_metrics(request: Request, hours: int = 24, user: Dict = Depends(require_admin)):
     """Get system metrics for time range"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -470,7 +476,7 @@ async def get_metrics(request: Request, hours: int = 24, user: Dict = Depends(re
 
 @app.get("/api/backups")
 @limiter.limit("30/minute")
-async def get_backups(request: Request, user: Dict = Depends(require_auth)):
+async def get_backups(request: Request, user: Dict = Depends(require_admin)):
     """Get backup history"""
     if not database or not backup_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
@@ -483,7 +489,7 @@ async def get_backups(request: Request, user: Dict = Depends(require_auth)):
 
 @app.post("/api/backup/now")
 @limiter.limit("2/minute")
-async def trigger_backup(request: Request, background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
+async def trigger_backup(request: Request, background_tasks: BackgroundTasks, user: Dict = Depends(require_admin)):
     """Trigger immediate backup"""
     if not backup_manager:
         raise HTTPException(status_code=503, detail="Backup manager not initialized")
@@ -498,7 +504,7 @@ async def trigger_backup(request: Request, background_tasks: BackgroundTasks, us
 
 @app.get("/api/alerts")
 @limiter.limit("30/minute")
-async def get_alerts(request: Request, acknowledged: bool = False, user: Dict = Depends(require_auth)):
+async def get_alerts(request: Request, acknowledged: bool = False, user: Dict = Depends(require_admin)):
     """Get alerts"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -510,7 +516,7 @@ async def get_alerts(request: Request, acknowledged: bool = False, user: Dict = 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
 @limiter.limit("30/minute")
-async def acknowledge_alert(request: Request, alert_id: int, user: Dict = Depends(require_auth)):
+async def acknowledge_alert(request: Request, alert_id: int, user: Dict = Depends(require_admin)):
     """Acknowledge an alert"""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -522,7 +528,7 @@ async def acknowledge_alert(request: Request, alert_id: int, user: Dict = Depend
 
 @app.post("/api/test-alert")
 @limiter.limit("3/minute")
-async def test_alert(request: Request, user: Dict = Depends(require_auth)):
+async def test_alert(request: Request, user: Dict = Depends(require_admin)):
     """Send test alert"""
     if not alert_manager:
         raise HTTPException(status_code=503, detail="Alert manager not initialized")
@@ -538,7 +544,7 @@ async def test_alert(request: Request, user: Dict = Depends(require_auth)):
 
 @app.get("/api/immich-update")
 @limiter.limit("5/minute")
-async def check_immich_update(request: Request, user: Dict = Depends(require_auth)):
+async def check_immich_update(request: Request, user: Dict = Depends(require_admin)):
     """Check if a newer Immich version is available on GitHub"""
     if not update_checker:
         raise HTTPException(status_code=503, detail="Update checker not initialized")
@@ -583,7 +589,7 @@ async def get_audit(
     request: Request,
     limit: int = 100,
     action: Optional[str] = None,
-    user: Dict = Depends(require_auth),
+    user: Dict = Depends(require_admin),
 ):
     """Get audit log entries."""
     if not database:
@@ -599,7 +605,7 @@ class RestoreRequest(BaseModel):
 
 @app.get("/api/backups/available")
 @limiter.limit("10/minute")
-async def list_available_backups(request: Request, user: Dict = Depends(require_auth)):
+async def list_available_backups(request: Request, user: Dict = Depends(require_admin)):
     """List all backup files available for restore."""
     if not backup_manager:
         raise HTTPException(status_code=503, detail="Backup manager not initialized")
@@ -612,7 +618,7 @@ async def restore_backup(
     request: Request,
     restore_req: RestoreRequest,
     background_tasks: BackgroundTasks,
-    user: Dict = Depends(require_auth),
+    user: Dict = Depends(require_admin),
 ):
     """
     Restore Immich database from a backup file.
@@ -694,7 +700,7 @@ _original_trigger_backup = trigger_backup
 
 @app.post("/api/backup/now", response_model=None)
 @limiter.limit("2/minute")
-async def trigger_backup_audited(request: Request, background_tasks: BackgroundTasks, user: Dict = Depends(require_auth)):
+async def trigger_backup_audited(request: Request, background_tasks: BackgroundTasks, user: Dict = Depends(require_admin)):
     """Trigger immediate backup (with audit logging)."""
     if not backup_manager:
         raise HTTPException(status_code=503, detail="Backup manager not initialized")
@@ -703,6 +709,57 @@ async def trigger_backup_audited(request: Request, background_tasks: BackgroundT
                      ip_address=request.client.host)
     background_tasks.add_task(backup_job)
     return {"status": "started", "message": "Backup started in background"}
+
+
+class RoleUpdate(BaseModel):
+    role: str  # "admin", "user", or "guest"
+
+
+@app.get("/api/auth/check")
+@limiter.limit("30/minute")
+async def check_auth(request: Request, user: Dict = Depends(require_admin)):
+    """Check authentication and return role info."""
+    local = user.get("_local_user", {})
+    return {
+        "authenticated": True,
+        "user": {"id": user.get("id"), "email": user.get("email"), "name": user.get("name")},
+        "role": local.get("role", "user"),
+    }
+
+
+@app.get("/api/admin/users")
+@limiter.limit("15/minute")
+async def list_users(request: Request, user: Dict = Depends(require_admin)):
+    """List all local users with roles."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"users": get_all_users(database)}
+
+
+@app.put("/api/admin/users/{user_id}/role")
+@limiter.limit("10/minute")
+async def change_user_role(
+    request: Request,
+    user_id: int,
+    body: RoleUpdate,
+    user: Dict = Depends(require_admin),
+):
+    """Change a user's role (admin only)."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    try:
+        success = update_user_role(database, user_id, body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot remove the last admin")
+    record_audit(
+        database, "role_changed",
+        user_id=user.get("id"),
+        details=f"target_user_id={user_id} new_role={body.role}",
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"status": "updated"}
 
 
 def main():
