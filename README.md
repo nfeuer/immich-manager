@@ -11,7 +11,7 @@ This project provides a complete, production-ready ecosystem around [Immich](htt
 - **Automated Backups** - Daily PostgreSQL dumps with 30-day retention
 - **Update Management** - Automated minor updates with rollback capability
 - **System Monitoring** - CPU, RAM, disk I/O metrics with historical data
-- **Alert System** - Email/webhook notifications for critical issues
+- **Alert System** - Email, webhook, and Discord notifications for critical issues
 - **Web Dashboard** - Real-time metrics and manual controls
 
 ### 📸 Photo Curator Assistant
@@ -187,12 +187,56 @@ alerts:
     smtp_password: "your-app-password"
     to:
       - "admin@yourdomain.com"
+  discord:
+    enabled: true
+    webhook_url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL"
+    bot_name: "House of Feuer"
+    server_name: "My Immich Server"  # optional label shown in embeds
+  quiet_hours:
+    enabled: true
+    start: "22:00"
+    end: "08:00"
 ```
 
-**Test email alerts:**
+**Test alerts (sends to all enabled channels):**
 ```bash
 curl -X POST http://localhost:8080/api/test-alert
 ```
+
+### Discord Alerts
+
+Discord webhook alerts are sent as rich embeds with colour-coded severity levels:
+
+| Colour | Severity | Description |
+|--------|----------|-------------|
+| 🔴 Red | Critical | Requires immediate attention |
+| 🟠 Orange | Warning | Degraded but not yet failing |
+| 🔵 Blue | Info | Informational notifications |
+
+**Quiet hours** apply to warning and info alerts (22:00–08:00 by default). Critical alerts are always sent.
+
+#### Alert types sent to Discord
+
+| Alert | Severity | Trigger |
+|-------|----------|---------|
+| **Disk Temperature — Critical** | Critical | Drive temp exceeds `disk_temp_critical` threshold (default 50 °C) |
+| **Disk Temperature — High** | Warning | Drive temp exceeds `disk_temp_warning` threshold (default 45 °C) |
+| **Disk Health — SMART Errors** | Critical / Warning | Reallocated, pending, or uncorrectable sectors detected |
+| **High Disk Usage** | Warning | Filesystem usage exceeds `disk_space_warning` (default 85 %) |
+| **Critical Disk Space** | Critical | Filesystem usage exceeds `disk_space_critical` (default 95 %) |
+| **Backup Completed** | Info | Scheduled or manual backup finished successfully |
+| **Backup Failed** | Critical | Backup job errored out |
+| **Backup Restored** | Info | Database successfully restored from a backup file |
+| **Restore Failed** | Critical | Database restore operation failed |
+| **Immich Containers Down** | Critical | One or more Immich Docker containers stopped unexpectedly |
+| **Immich Containers Recovered** | Info | All containers are running again after a downtime event |
+| **Immich Update Available** | Info | A new Immich release is available on GitHub |
+| **Immich Auto-Updated** | Info | Patch update applied automatically (snapshot kept for rollback) |
+| **Immich Update Failed** | Critical | Auto-update failed and was rolled back |
+| **Immich Updated** | Info | Manual update applied successfully |
+| **Rollback Completed** | Info | Immich rolled back to a previous snapshot |
+| **Rollback Failed** | Critical | Snapshot rollback failed |
+| **Test Alert** | Info | Sent via `POST /api/test-alert` to verify the integration |
 
 ### Photo Curator
 
@@ -486,10 +530,10 @@ MIT License - See LICENSE file for details
 - [x] Multi-site backup support (S3, Backblaze)
 - [x] Prometheus metrics endpoint
 - [x] Immich auto-updater — watches for new releases, applies patch updates, snapshot + rollback *(Effort: M)*
+- [x] Discord webhook alerts — rich embeds with severity colours, quiet hours, all system events *(Effort: S)*
 
 ### 🔄 In Progress
 - [~] Prometheus/Grafana integration — Prometheus done; Grafana dashboard config needed *(Effort: XS)*
-- [~] Telegram/Discord bot integration — Discord webhook alerts done; Telegram + interactive bot commands needed *(Effort: S–M)*
 - [~] Advanced AI features — Basic face detection done; face recognition + scene detection needed *(Effort: M–L)*
 
 ### 📋 Planned

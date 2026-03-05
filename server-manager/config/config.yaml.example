@@ -104,8 +104,8 @@ alerts:
     enabled: false
     url: ""
   discord:
-    enabled: false
-    webhook_url: "${DISCORD_WEBHOOK_URL:-}"  # Discord channel webhook URL
+    enabled: true
+    webhook_url: "https://discord.com/api/webhooks/1477171884113137776/c5V2BXJ0lmaHEwihAsIwqDee-xOhKH9tQvWsqMHr6ejid5RG2cEXB7rtnJ2T1JRxNipr"
     bot_name: "House of Feuer"              # Display name in Discord
     server_name: ""                          # Optional: label for this server
   quiet_hours:

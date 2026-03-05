@@ -233,6 +233,14 @@ async def startup_event():
             id='cleanup'
         )
 
+        # Schedule Immich container health checks (every 5 minutes)
+        scheduler.add_job(
+            check_immich_health_job,
+            'interval',
+            seconds=300,
+            id='immich_health_check'
+        )
+
         # Check for Immich updates (daily at 10 AM)
         scheduler.add_job(
             check_immich_update_job,
@@ -351,6 +359,12 @@ async def collect_metrics_job():
                 "disk_space",
                 f"Disk usage critical: {metrics['disk_usage_percent']:.1f}%"
             )
+        elif config and metrics.get('disk_usage_percent', 0) > config.thresholds.disk_space_warning:
+            await alert_manager.send_alert(
+                "High Disk Usage",
+                f"Disk usage: {metrics['disk_usage_percent']:.1f}% (threshold: {config.thresholds.disk_space_warning}%)",
+                "warning"
+            )
 
     except Exception as e:
         print(f"Error collecting metrics: {e}")
@@ -399,6 +413,41 @@ async def cleanup_job():
         print("Database cleanup completed")
     except Exception as e:
         print(f"Error in cleanup job: {e}")
+
+
+_immich_was_healthy: bool = True
+
+
+async def check_immich_health_job():
+    """Check if Immich containers are running and alert on state change."""
+    global _immich_was_healthy
+    if not docker_monitor or not alert_manager:
+        return
+
+    try:
+        healthy = docker_monitor.check_immich_healthy()
+        if not healthy and _immich_was_healthy:
+            containers = docker_monitor.get_immich_containers()
+            down = [c["name"] for c in containers if c.get("status") != "running"]
+            await alert_manager.send_alert(
+                "Immich Containers Down",
+                f"One or more Immich containers are not running: {', '.join(down) if down else 'none found'}",
+                "critical",
+            )
+            if database:
+                database.record_alert(
+                    "critical", "immich_health",
+                    f"Immich containers down: {', '.join(down) if down else 'unknown'}"
+                )
+        elif healthy and not _immich_was_healthy:
+            await alert_manager.send_alert(
+                "Immich Containers Recovered",
+                "All Immich containers are running again.",
+                "info",
+            )
+        _immich_was_healthy = healthy
+    except Exception as e:
+        print(f"Error in Immich health check: {e}")
 
 
 async def check_immich_update_job():
