@@ -31,6 +31,7 @@ from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
 from .backup import BackupManager
 from .alerts import AlertManager
 from .update_checker import UpdateChecker
+from .auto_updater import AutoUpdater
 from .prometheus import generate_metrics
 from .audit import ensure_audit_table, record_audit, get_audit_log
 from .logging_config import setup_json_logging
@@ -146,6 +147,7 @@ docker_monitor: Optional[DockerMonitor] = None
 backup_manager: Optional[BackupManager] = None
 alert_manager: Optional[AlertManager] = None
 update_checker: Optional[UpdateChecker] = None
+auto_updater: Optional[AutoUpdater] = None
 scheduler: Optional[AsyncIOScheduler] = None
 
 
@@ -153,7 +155,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 async def startup_event():
     """Initialize application on startup"""
     global config, database, disk_monitor, system_monitor, docker_monitor
-    global backup_manager, alert_manager, update_checker, scheduler
+    global backup_manager, alert_manager, update_checker, auto_updater, scheduler
 
     try:
         # Load configuration
@@ -178,6 +180,17 @@ async def startup_event():
 
         # Initialize update checker
         update_checker = UpdateChecker(docker_monitor)
+
+        # Initialize auto-updater (only when enabled in config)
+        if config.auto_update.enabled:
+            auto_updater = AutoUpdater(
+                config=config.auto_update,
+                backup_manager=backup_manager,
+                docker_monitor=docker_monitor,
+                update_checker=update_checker,
+                database=database,
+                immich_api_url=config.immich.api_url,
+            )
 
         # Store Immich API URL for auth validation
         app.state.immich_api_url = config.immich.api_url
@@ -227,6 +240,16 @@ async def startup_event():
             hour=10,
             id='immich_update_check'
         )
+
+        # Clean up old snapshots (weekly, Sunday at 4 AM)
+        if config.auto_update.enabled:
+            scheduler.add_job(
+                snapshot_cleanup_job,
+                'cron',
+                day_of_week='sun',
+                hour=4,
+                id='snapshot_cleanup'
+            )
 
         # Watchdog heartbeat (every 30s, half of WatchdogSec=60)
         async def _watchdog_heartbeat():
@@ -379,31 +402,55 @@ async def cleanup_job():
 
 
 async def check_immich_update_job():
-    """Background job to check for Immich updates on GitHub"""
+    """Check for Immich updates and auto-apply patch bumps when configured."""
     if not update_checker or not alert_manager or not database:
         return
 
     try:
         update_info = update_checker.check_for_update()
-        if update_info:
-            msg = (
-                f"Immich v{update_info['latest_version']} is available "
-                f"(currently running v{update_info['running_version']}).\n"
-                f"Release notes: {update_info['release_url']}"
-            )
-            await alert_manager.send_alert(
-                "Immich Update Available",
-                msg,
-                "info",
-            )
-            database.record_alert(
-                "info",
-                "immich_update",
-                msg,
-            )
-            print(f"Immich update available: v{update_info['latest_version']}")
+        if not update_info:
+            return
+
+        # Let auto-updater handle patch bumps when enabled
+        if auto_updater:
+            result = auto_updater.check_and_auto_apply(update_info)
+            if result is not None:
+                if result["status"] == "success":
+                    msg = (
+                        f"Immich auto-updated from v{result['from_version']} "
+                        f"to v{result['to_version']} (snapshot {result['snapshot_id']} kept for rollback)."
+                    )
+                    await alert_manager.send_alert("Immich Auto-Updated", msg, "info")
+                else:
+                    msg = (
+                        f"Immich auto-update to v{update_info['latest_version']} failed "
+                        f"and was rolled back: {result.get('error', 'unknown error')}"
+                    )
+                    await alert_manager.send_alert("Immich Update Failed", msg, "critical")
+                database.record_alert("info", "immich_update", msg)
+                return  # handled – skip the alert-only path below
+
+        # Alert-only: non-patch bump, or auto-updater disabled
+        msg = (
+            f"Immich v{update_info['latest_version']} is available "
+            f"(currently running v{update_info['running_version']}).\n"
+            f"Release notes: {update_info['release_url']}"
+        )
+        await alert_manager.send_alert("Immich Update Available", msg, "info")
+        database.record_alert("info", "immich_update", msg)
+        print(f"Immich update available: v{update_info['latest_version']}")
     except Exception as e:
         print(f"Error checking Immich updates: {e}")
+
+
+async def snapshot_cleanup_job():
+    """Remove snapshot directories older than retention_days."""
+    if not auto_updater:
+        return
+    try:
+        auto_updater.cleanup_old_snapshots()
+    except Exception as e:
+        print(f"Error cleaning up snapshots: {e}")
 
 
 # API Endpoints
@@ -760,6 +807,139 @@ async def change_user_role(
         ip_address=request.client.host if request.client else None,
     )
     return {"status": "updated"}
+
+
+# --- Auto-updater endpoints ---
+
+@app.get("/api/snapshots")
+@limiter.limit("15/minute")
+async def list_snapshots(request: Request, user: Dict = Depends(require_admin)):
+    """List pre-update snapshots available for rollback."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"snapshots": database.get_snapshots()}
+
+
+@app.post("/api/snapshots")
+@limiter.limit("2/hour")
+async def create_snapshot(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: Dict = Depends(require_admin),
+):
+    """Create a manual snapshot of the current Immich DB and compose files."""
+    if not auto_updater:
+        raise HTTPException(status_code=503, detail="Auto-updater not enabled in config")
+    if database:
+        record_audit(database, "snapshot_triggered", user_id=user.get("id"),
+                     ip_address=request.client.host if request.client else None)
+
+    async def _run():
+        result = auto_updater.take_snapshot(trigger="manual")
+        logger.info(f"Manual snapshot result: {result}")
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Snapshot creation started in background"}
+
+
+@app.post("/api/snapshots/{snapshot_id}/rollback")
+@limiter.limit("1/hour")
+async def rollback_snapshot(
+    request: Request,
+    snapshot_id: int,
+    background_tasks: BackgroundTasks,
+    user: Dict = Depends(require_admin),
+):
+    """Roll back Immich to a previous snapshot."""
+    if not auto_updater or not database:
+        raise HTTPException(status_code=503, detail="Auto-updater not enabled in config")
+
+    snapshots = database.get_snapshots()
+    if not any(s["id"] == snapshot_id for s in snapshots):
+        raise HTTPException(status_code=404, detail=f"Snapshot {snapshot_id} not found")
+
+    record_audit(database, "rollback_initiated", user_id=user.get("id"),
+                 details=f"snapshot_id={snapshot_id}",
+                 ip_address=request.client.host if request.client else None)
+
+    async def _run():
+        result = auto_updater.rollback_to_snapshot(snapshot_id)
+        logger.info(f"Rollback to snapshot {snapshot_id}: {result}")
+        if alert_manager:
+            if result["status"] == "success":
+                await alert_manager.send_alert(
+                    "Rollback Completed",
+                    f"Immich rolled back to v{result.get('version_restored')} (snapshot {snapshot_id})",
+                    "info",
+                )
+            else:
+                await alert_manager.send_alert(
+                    "Rollback Failed",
+                    f"Rollback to snapshot {snapshot_id} failed: {result.get('errors')}",
+                    "critical",
+                )
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": f"Rollback to snapshot {snapshot_id} started in background"}
+
+
+@app.get("/api/updates/history")
+@limiter.limit("15/minute")
+async def get_update_history(request: Request, user: Dict = Depends(require_admin)):
+    """Get Immich update history."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    return {"history": database.get_update_history()}
+
+
+@app.post("/api/updates/apply")
+@limiter.limit("1/hour")
+async def apply_update(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: Dict = Depends(require_admin),
+):
+    """
+    Manually trigger an update to the latest available Immich version.
+    Takes a snapshot first; rolls back automatically on health-check failure.
+    """
+    if not auto_updater or not update_checker:
+        raise HTTPException(status_code=503, detail="Auto-updater not enabled in config")
+
+    latest = update_checker.get_latest_github_version()
+    if not latest:
+        raise HTTPException(status_code=503, detail="Could not fetch latest Immich version from GitHub")
+
+    running = update_checker.get_running_version()
+    if running == latest:
+        return {"status": "up_to_date", "version": running}
+
+    record_audit(database, "update_triggered", user_id=user.get("id"),
+                 details=f"target_version={latest}",
+                 ip_address=request.client.host if request.client else None)
+
+    async def _run():
+        result = auto_updater.apply_update(latest)
+        logger.info(f"Manual update result: {result}")
+        if alert_manager:
+            if result["status"] == "success":
+                await alert_manager.send_alert(
+                    "Immich Updated",
+                    f"Immich updated from v{result['from_version']} to v{result['to_version']}",
+                    "info",
+                )
+            else:
+                msg = f"Immich update to v{latest} failed: {result.get('error')}"
+                if result.get("rolled_back"):
+                    msg += " (automatically rolled back)"
+                await alert_manager.send_alert("Immich Update Failed", msg, "critical")
+
+    background_tasks.add_task(_run)
+    return {
+        "status": "started",
+        "message": f"Update to v{latest} started in background (snapshot will be taken first)",
+        "target_version": latest,
+    }
 
 
 def main():

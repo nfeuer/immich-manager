@@ -68,6 +68,15 @@ backup_verification:
     weekly: 4     # Keep 4 weekly backups (one per week)
     monthly: 12   # Keep 12 monthly backups (one per month)
 
+auto_update:
+  enabled: false              # Set to true to enable the auto-updater
+  apply_patch_updates: false  # Auto-apply patch bumps (e.g. 1.99.0 → 1.99.1)
+                              # Minor (1.Y.z) and major (X.y.z) bumps always require
+                              # manual approval via POST /api/updates/apply
+  docker_compose_path: "/opt/immich"   # Directory containing docker-compose.yml
+  snapshot_retention_days: 7           # Days to keep pre-update snapshots
+  health_check_timeout: 120            # Seconds to wait for Immich to come back healthy
+
 monitoring:
   disk_check_interval: 300  # 5 minutes
   metrics_interval: 60      # 1 minute
