@@ -434,6 +434,11 @@ immich-manager/
 - `POST /api/backup/now` - Trigger backup
 - `GET /api/alerts` - Get alerts
 - `POST /api/test-alert` - Send test alert
+- `GET /api/snapshots` - List pre-update snapshots
+- `POST /api/snapshots` - Create manual snapshot
+- `POST /api/snapshots/{id}/rollback` - Roll back to a snapshot
+- `GET /api/updates/history` - Update history
+- `POST /api/updates/apply` - Trigger update to latest version
 
 ### Photo Curator API
 
@@ -480,6 +485,7 @@ MIT License - See LICENSE file for details
 ### ✅ Completed
 - [x] Multi-site backup support (S3, Backblaze)
 - [x] Prometheus metrics endpoint
+- [x] Immich auto-updater — watches for new releases, applies patch updates, snapshot + rollback *(Effort: M)*
 
 ### 🔄 In Progress
 - [~] Prometheus/Grafana integration — Prometheus done; Grafana dashboard config needed *(Effort: XS)*
@@ -508,7 +514,6 @@ MIT License - See LICENSE file for details
 - [ ] Photo book PDF export — generate printable PDF locally for upload to any print service *(Effort: L)*
 
 #### Ops & Reliability
-- [ ] Immich auto-updater — watch for new releases, apply minor updates, snapshot + rollback *(Effort: M)*
 - [ ] Self-update for immich-manager — git pull + restart workflow to keep manager current *(Effort: S)*
 
 #### Notifications & Reporting
