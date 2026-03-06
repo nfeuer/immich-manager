@@ -532,6 +532,8 @@ MIT License - See LICENSE file for details
 - [x] Immich auto-updater — watches for new releases, applies patch updates, snapshot + rollback *(Effort: M)*
 - [x] Discord webhook alerts — rich embeds with severity colours, quiet hours, all system events *(Effort: S)*
 - [x] Advanced AI features — face recognition (128-dim dlib embeddings, greedy identity clustering, user labelling + merge) and scene detection (MobileNetV2-Places365, 10 super-categories) *(Effort: M–L)*
+- [x] Guest access links — temporary expiring share links for non-Immich users *(Effort: S)*
+- [x] Role management — admin, family member, and guest permission tiers *(Effort: L)*
 
 ### 🔄 In Progress
 - [~] Prometheus/Grafana integration — Prometheus done; Grafana dashboard config needed *(Effort: XS)*
@@ -545,8 +547,6 @@ MIT License - See LICENSE file for details
 
 #### User & Access Management
 - [ ] User onboarding flow — invite family members via email, auto-create Immich accounts *(Effort: M)*
-- [ ] Guest access links — temporary expiring share links for non-Immich users *(Effort: S)*
-- [ ] Role management — admin, family member, and guest permission tiers *(Effort: L)*
 
 #### Automation & Intelligence
 - [ ] Smart album rules engine — auto-populate albums by date, location, quality score, or face tags *(Effort: L)*
