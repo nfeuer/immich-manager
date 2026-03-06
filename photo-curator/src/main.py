@@ -134,6 +134,11 @@ class AlbumCreate(BaseModel):
     description: Optional[str] = None
 
 
+class EventAlbumCreate(BaseModel):
+    """Request to create an album from a detected event suggestion"""
+    album_name: str
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize application"""
@@ -2041,6 +2046,333 @@ async def cancel_import_job(
         database.update_import_job_status(job_id, "cancelled")
 
     return {"status": "cancelling", "job_id": job_id}
+
+
+# ── Event / Trip Detection ────────────────────────────────────────────────────
+
+MIN_EVENT_PHOTOS = 20  # Clusters smaller than this are silently ignored
+
+# Scene category → descriptive kind label (single-day / multi-day variants)
+_SCENE_KIND: Dict[str, tuple] = {
+    # (single-day label, multi-day label)
+    "beach":    ("Beach Day",     "Beach Trip"),
+    "mountain": ("Hike",          "Mountain Trip"),
+    "urban":    ("City Day",      "City Trip"),
+    "nature":   ("Nature Walk",   "Nature Trip"),
+    "food":     ("Dining Out",    "Food Tour"),
+    "sports":   ("Sports Event",  "Sports Trip"),
+    "night":    ("Night Out",     "Night Trip"),
+    "event":    ("Event",         "Trip"),
+    "indoor":   ("Gathering",     "Trip"),
+    "outdoor":  ("Day Out",       "Outdoor Trip"),
+}
+# Minimum fraction of classified photos that must share a scene to use it
+_SCENE_DOMINANCE_THRESHOLD = 0.40
+
+# Simple in-memory cache: (rounded_lat, rounded_lon) → location string
+_geocode_cache: Dict[tuple, Optional[str]] = {}
+
+
+def _reverse_geocode(lat: float, lon: float) -> Optional[str]:
+    """Return a human-readable location label via Nominatim (free, no API key).
+
+    Rounds coordinates to ~1 km precision before caching so nearby points
+    share the same cache entry.  Returns None on any error so callers can
+    gracefully fall back to a date-only title.
+    """
+    import time as _time
+    key = (round(lat, 2), round(lon, 2))
+    if key in _geocode_cache:
+        return _geocode_cache[key]
+
+    try:
+        import requests as _req
+        r = _req.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lon, "format": "json", "zoom": 10},
+            headers={"User-Agent": "immich-photo-curator/1.0"},
+            timeout=4,
+        )
+        r.raise_for_status()
+        addr = r.json().get("address", {})
+        city = (
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("village")
+            or addr.get("county")
+        )
+        country = addr.get("country_code", "").upper()
+        label = f"{city}, {country}" if city and country else city or None
+        _geocode_cache[key] = label
+        _time.sleep(0.5)  # Nominatim rate limit: 1 req/s
+        return label
+    except Exception:
+        _geocode_cache[key] = None
+        return None
+
+
+def _cluster_photos_into_events(
+    assets: List[Dict],
+    user_id: str,
+    db,  # Database instance — used for scene, face, and score queries
+) -> List[Dict]:
+    """Cluster a list of Immich assets into trip/event suggestions.
+
+    Two-pass algorithm:
+    Pass 1 — split into photo sessions wherever consecutive photos are > 4 hours apart.
+             This groups photos taken in a single continuous outing (e.g. morning hike,
+             evening dinner).
+    Pass 2 — merge adjacent sessions that are < 24 hours apart end-to-start.
+             This keeps multi-day trips together: overnight gaps (8–12 h) between
+             Day 1 and Day 2 photos don't split a trip into separate albums.
+             A true gap ≥ 24 hours means a genuinely different event.
+
+    After merging, skip clusters with fewer than MIN_EVENT_PHOTOS total photos.
+
+    Each qualifying cluster is enriched with:
+    - Scene distribution (beach, mountain, urban…) → descriptive kind label
+    - Labeled face identities → participants list ("Mom", "John", …)
+    - GPS median → Nominatim reverse-geocoded location label
+    - Best-scored thumbnail (actual AI score, not just "first scored photo")
+    """
+    def _parse_ts(asset: Dict) -> Optional[datetime]:
+        for field in ("fileCreatedAt", "localDateTime", "takenAt"):
+            val = asset.get(field)
+            if val:
+                try:
+                    ts = val.rstrip("Z").replace("T", " ")
+                    return datetime.fromisoformat(ts)
+                except ValueError:
+                    pass
+        return None
+
+    # Attach parsed timestamps and drop photos we can't date
+    dated = []
+    for a in assets:
+        ts = _parse_ts(a)
+        if ts:
+            dated.append((ts, a))
+
+    if not dated:
+        return []
+
+    dated.sort(key=lambda x: x[0])
+
+    # Pass 1: split into photo sessions (4-hour intra-session gap)
+    sessions: List[List[tuple]] = []
+    current: List[tuple] = [dated[0]]
+    for ts, asset in dated[1:]:
+        gap_h = (ts - current[-1][0]).total_seconds() / 3600
+        if gap_h > 4:
+            sessions.append(current)
+            current = [(ts, asset)]
+        else:
+            current.append((ts, asset))
+    sessions.append(current)
+
+    # Pass 2: merge sessions separated by < 24 hours (handles overnight trip gaps)
+    merged: List[List[tuple]] = [sessions[0]]
+    for session in sessions[1:]:
+        prev_end = merged[-1][-1][0]
+        this_start = session[0][0]
+        gap_h = (this_start - prev_end).total_seconds() / 3600
+        if gap_h < 24:
+            merged[-1].extend(session)   # same trip
+        else:
+            merged.append(session)       # genuinely different event
+
+    clusters = merged
+
+    def _day(ts: datetime) -> str:
+        return str(ts.day)
+
+    events = []
+    for cluster in clusters:
+        if len(cluster) < MIN_EVENT_PHOTOS:
+            continue
+
+        start_ts, _ = cluster[0]
+        end_ts, _ = cluster[-1]
+        asset_ids = [a["id"] for _, a in cluster]
+        delta_days = (end_ts.date() - start_ts.date()).days
+
+        # ── Format date string ────────────────────────────────────────────
+        if delta_days == 0:
+            date_str = f"{start_ts.strftime('%B')} {_day(start_ts)}, {start_ts.year}"
+        elif start_ts.month == end_ts.month and start_ts.year == end_ts.year:
+            date_str = f"{start_ts.strftime('%B')} {_day(start_ts)}–{_day(end_ts)}, {start_ts.year}"
+        else:
+            date_str = (
+                f"{start_ts.strftime('%b')} {_day(start_ts)}"
+                f" – {end_ts.strftime('%b')} {_day(end_ts)}, {end_ts.year}"
+            )
+
+        # ── Scene-based kind label ────────────────────────────────────────
+        # Query which scene categories appear across the cluster's photos.
+        scene_dist = db.get_scene_distribution_for_assets(user_id, asset_ids)
+        classified_count = sum(scene_dist.values())
+        kind = "Trip" if delta_days >= 2 else "Event"  # fallback
+        if classified_count > 0:
+            dominant_scene = max(scene_dist, key=scene_dist.get)
+            dominance = scene_dist[dominant_scene] / classified_count
+            if dominance >= _SCENE_DOMINANCE_THRESHOLD and dominant_scene in _SCENE_KIND:
+                single_label, multi_label = _SCENE_KIND[dominant_scene]
+                kind = multi_label if delta_days >= 2 else single_label
+
+        # ── GPS → location label ─────────────────────────────────────────
+        lats, lons = [], []
+        for _, a in cluster:
+            exif = a.get("exifInfo") or {}
+            lat = exif.get("latitude")
+            lon = exif.get("longitude")
+            if lat is not None and lon is not None:
+                lats.append(float(lat))
+                lons.append(float(lon))
+
+        location_label = None
+        if lats:
+            lats.sort(); lons.sort()
+            mid = len(lats) // 2
+            location_label = _reverse_geocode(lats[mid], lons[mid])
+
+        # ── Face participants ─────────────────────────────────────────────
+        participants = db.get_labeled_faces_for_assets(user_id, asset_ids)
+
+        # ── Build title ───────────────────────────────────────────────────
+        # Format: "{Location · }{Kind} · {Date}"
+        # e.g. "Paris, FR · Beach Trip · June 2–7, 2024"
+        #      "Mountain Hike · March 15, 2024"
+        parts = []
+        if location_label:
+            parts.append(location_label)
+        parts.append(kind)
+        parts.append(date_str)
+        title = " · ".join(parts)
+
+        # ── Best thumbnail ────────────────────────────────────────────────
+        # Pick highest-scored photo; fall back to first asset in cluster.
+        best_id = db.get_best_scored_asset(user_id, asset_ids) or asset_ids[0]
+
+        events.append({
+            "title": title,
+            "start_date": start_ts.isoformat(),
+            "end_date": end_ts.isoformat(),
+            "photo_count": len(cluster),
+            "thumbnail_asset_id": best_id,
+            "asset_ids": asset_ids,
+            "participants": participants,
+        })
+
+    return events
+
+
+@app.get("/events", response_class=HTMLResponse)
+async def events_ui(request: Request, user: Dict = Depends(require_user_page)):
+    """Serve the Events & Trips page."""
+    with open(Path(__file__).parent.parent / "static" / "events.html") as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.get("/api/events")
+@limiter.limit("30/minute")
+async def get_event_suggestions(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+):
+    """Return saved (non-dismissed) event suggestions for the current user."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    suggestions = database.get_event_suggestions(user["id"])
+    return {"events": suggestions}
+
+
+@app.post("/api/events/detect")
+@limiter.limit("5/minute")
+async def detect_events(
+    request: Request,
+    year: Optional[int] = None,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Run event/trip detection for the user and persist results.
+
+    Pass ?year=2024 to scan a specific year; defaults to current year.
+    Returns the updated list of non-dismissed suggestions.
+    """
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    scan_year = year or datetime.now().year
+    user_id = user["id"]
+
+    try:
+        user_client = ImmichClient(app.state.immich_api_url, user["access_token"])
+        assets = user_client.get_photos_for_year(user_id, scan_year)
+
+        events = _cluster_photos_into_events(assets, user_id, database)
+        database.save_event_suggestions(user_id, events)
+
+        suggestions = database.get_event_suggestions(user_id)
+        return {"events": suggestions, "detected": len(events), "scanned": len(assets)}
+
+    except Exception as e:
+        logger.error(f"Event detection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/events/{event_id}/dismiss")
+@limiter.limit("30/minute")
+async def dismiss_event_suggestion(
+    request: Request,
+    event_id: int,
+    user: Dict = Depends(get_current_user),
+):
+    """Permanently hide an event suggestion. It will not reappear on re-scan."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    ok = database.dismiss_event_suggestion(user["id"], event_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return {"status": "dismissed"}
+
+
+@app.post("/api/events/{event_id}/create-album")
+@limiter.limit("10/minute")
+async def create_album_from_event(
+    request: Request,
+    event_id: int,
+    body: EventAlbumCreate,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Create an Immich album from a detected event suggestion."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    suggestions = database.get_event_suggestions(user["id"])
+    suggestion = next((s for s in suggestions if s["id"] == event_id), None)
+    if not suggestion:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    try:
+        user_client = ImmichClient(app.state.immich_api_url, user["access_token"])
+        album = user_client.create_album(
+            body.album_name,
+            suggestion["asset_ids"],
+            description=f"Auto-detected: {suggestion['title']}",
+        )
+        if not album:
+            raise HTTPException(status_code=500, detail="Failed to create album in Immich")
+
+        database.mark_event_album_created(user["id"], event_id, album["id"])
+
+        return {"status": "created", "album": album, "photo_count": suggestion["photo_count"]}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create album from event {event_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def main():

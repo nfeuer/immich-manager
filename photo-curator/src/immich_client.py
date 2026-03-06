@@ -104,6 +104,43 @@ class ImmichClient:
             logger.error(f"Error fetching photos: {e}")
             return []
 
+    def get_photos_for_year(self, user_id: str, year: int) -> List[Dict[str, Any]]:
+        """
+        Get all photos for a user in a full year, including exifInfo for
+        GPS coordinates and precise timestamps used by event detection.
+
+        Returns:
+            List of asset dicts with at minimum: id, fileCreatedAt, exifInfo
+        """
+        try:
+            start_str = f"{year}-01-01T00:00:00.000Z"
+            end_str = f"{year + 1}-01-01T00:00:00.000Z"
+
+            search_payload = {
+                'takenAfter': start_str,
+                'takenBefore': end_str,
+                'userId': user_id,
+                'type': 'IMAGE',
+                'size': 50000,
+                'withExif': True,
+            }
+
+            response = self.session.post(
+                f"{self.api_url}/search/metadata",
+                json=search_payload,
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            assets = data.get('assets', {}).get('items', [])
+
+            logger.info(f"Found {len(assets)} photos for user {user_id} in {year}")
+            return assets
+
+        except Exception as e:
+            logger.error(f"Error fetching photos for year {year}: {e}")
+            return []
+
     def get_asset_info(self, asset_id: str) -> Optional[Dict[str, Any]]:
         """
         Get detailed information about an asset
