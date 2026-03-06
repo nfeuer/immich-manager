@@ -62,6 +62,11 @@ mark_step_start "phase2_photo_curator" "install_dependencies"
 pip install --upgrade pip > /dev/null
 pip install -r requirements.txt
 
+# Install ML/AI dependencies (face recognition, scene detection)
+# dlib requires cmake + build-essential; torch is ~2 GB — expect several minutes
+echo "Installing ML/AI dependencies (dlib, torch — this takes a few minutes)..."
+pip install -r requirements-ml.txt
+
 # Install system dependencies for OpenCV
 sudo apt-get update > /dev/null
 sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 > /dev/null

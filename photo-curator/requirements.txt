@@ -1,3 +1,9 @@
+# Core dependencies — safe to install anywhere (CI, cloud dev, production)
+# Heavy ML/AI deps (dlib, torch, face_recognition, torchvision) → requirements-ml.txt
+#
+# Rule: add here if pip installs it in <30s on a clean machine.
+#       add to requirements-ml.txt if it requires compilation or is >100 MB.
+
 fastapi>=0.115.0,<1.0
 uvicorn[standard]>=0.32.0,<1.0
 sqlalchemy>=2.0.36,<3.0
@@ -15,9 +21,5 @@ websockets>=14.0,<17.0
 aiosqlite>=0.20.0,<1.0
 slowapi>=0.1.9,<1.0
 sdnotify>=0.3.2,<1.0  # Systemd watchdog heartbeat
-# Advanced AI: face recognition (requires cmake + build-essential for dlib)
-face_recognition>=1.3.0,<2.0
-dlib>=19.24,<20.0
-# Advanced AI: scene detection (Places365 MobileNetV2)
-torch>=2.0,<3.0
-torchvision>=0.15,<1.0
+# ML/AI features (face recognition, scene detection) → requirements-ml.txt
+# Install separately: pip install -r requirements-ml.txt

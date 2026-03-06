@@ -1,0 +1,14 @@
+# ML/AI dependencies — install separately for full functionality
+# These require cmake + build-essential (dlib) and are large (~2 GB for torch).
+#
+# Production: installed automatically by scripts/20-install-photo-curator.sh
+# Cloud dev:  NOT installed by session-start.sh (too slow for cloud environments)
+# Manual:     pip install -r requirements-ml.txt
+
+# Advanced AI: face recognition (requires cmake + build-essential for dlib)
+face_recognition>=1.3.0,<2.0
+dlib>=19.24,<20.0  # heavy: compiles from C++ source, 15-30 min on clean machine
+
+# Advanced AI: scene detection (Places365 MobileNetV2)
+torch>=2.0,<3.0        # heavy: ~2 GB download
+torchvision>=0.15,<1.0
