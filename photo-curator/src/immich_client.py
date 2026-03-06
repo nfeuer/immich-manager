@@ -312,15 +312,16 @@ class ImmichClient:
 
     def get_thumbnail_url(self, asset_id: str) -> str:
         """
-        Get thumbnail URL for an asset
+        Get proxied thumbnail URL for an asset.
+        Routes through the curator backend so tokens are not exposed to the browser.
 
         Args:
             asset_id: Asset ID
 
         Returns:
-            Thumbnail URL with API key
+            Proxied thumbnail URL (no token in URL)
         """
-        return f"{self.api_url}/assets/{asset_id}/thumbnail?key={self.api_key}"
+        return f"/api/thumbnail/{asset_id}"
 
     def check_connection(self) -> bool:
         """

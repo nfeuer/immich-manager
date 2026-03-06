@@ -1,7 +1,8 @@
 # Photo Curator Configuration
+# https://houseoffeuer.com  |  Discord: House of Feuer
 
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"  # Use "0.0.0.0" only if you need LAN access and have a reverse proxy/firewall
   port: 8081
   workers: 2
 
@@ -14,7 +15,11 @@ immich:
 
   # API key (OPTIONAL - only needed for admin background jobs)
   # Users authenticate via Immich SSO, so this is only for system tasks
-  api_key: ""  # Same as Server Manager (optional)
+  api_key: "${IMMICH_API_KEY:-}"  # Same as Server Manager (optional). Use env var or paste directly.
+
+auth:
+  default_role: "user"                  # Role for new Immich users: "admin", "user", or "guest"
+  guest_link_default_expiry_days: 30    # Default expiration for guest share links (0 = no expiry)
 
 ai:
   use_local_models: true
@@ -39,6 +44,6 @@ notifications:
     enabled: true
     smtp_host: "smtp.gmail.com"
     smtp_port: 587
-    smtp_user: "your-email@gmail.com"
-    smtp_password: "your-app-password"
+    smtp_user: "${SMTP_USER:-your-email@gmail.com}"
+    smtp_password: "${SMTP_PASSWORD}"  # Use env var: export SMTP_PASSWORD='your-app-password'
     from: "photo-curator@yourdomain.com"

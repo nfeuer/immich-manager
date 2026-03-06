@@ -3,6 +3,7 @@ Configuration management for Immich Server Manager
 """
 
 import os
+import re
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -87,11 +88,34 @@ class WebhookConfig(BaseModel):
     url: str = ""
 
 
+class DiscordConfig(BaseModel):
+    """Discord webhook alert configuration"""
+    enabled: bool = False
+    webhook_url: str = ""
+    bot_name: str = "House of Feuer"
+    server_name: str = ""  # Optional: your server's display name
+
+
 class AlertsConfig(BaseModel):
     """Alerts configuration"""
     email: EmailConfig = Field(default_factory=EmailConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
+    discord: DiscordConfig = Field(default_factory=DiscordConfig)
     quiet_hours: QuietHoursConfig = Field(default_factory=QuietHoursConfig)
+
+
+class AuthConfig(BaseModel):
+    """Authentication and RBAC configuration"""
+    default_role: str = "user"  # Role for new users: "admin", "user", or "guest"
+
+
+class AutoUpdateConfig(BaseModel):
+    """Auto-updater configuration"""
+    enabled: bool = False
+    apply_patch_updates: bool = False   # Auto-apply x.y.Z → x.y.Z+1 patches
+    docker_compose_path: str = "/opt/immich"
+    snapshot_retention_days: int = 7
+    health_check_timeout: int = 120     # Seconds to wait for healthy post-update
 
 
 class Config(BaseModel):
@@ -103,11 +127,41 @@ class Config(BaseModel):
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     thresholds: ThresholdsConfig = Field(default_factory=ThresholdsConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+    auto_update: AutoUpdateConfig = Field(default_factory=AutoUpdateConfig)
+
+
+_ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')
+
+
+def _resolve_env_vars(obj):
+    """
+    Recursively resolve ${ENV_VAR} and ${ENV_VAR:-default} references in
+    config values.  This lets users keep secrets out of config files, e.g.:
+        smtp_password: "${SMTP_PASSWORD}"
+        api_key: "${IMMICH_API_KEY:-}"
+    """
+    if isinstance(obj, str):
+        def _replace(match):
+            expr = match.group(1)
+            if ':-' in expr:
+                var_name, default = expr.split(':-', 1)
+            else:
+                var_name, default = expr, ''
+            return os.environ.get(var_name.strip(), default)
+        return _ENV_VAR_PATTERN.sub(_replace, obj)
+    elif isinstance(obj, dict):
+        return {k: _resolve_env_vars(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_resolve_env_vars(item) for item in obj]
+    return obj
 
 
 def load_config(config_path: Optional[str] = None) -> Config:
     """
-    Load configuration from YAML file
+    Load configuration from YAML file.
+
+    Supports ${ENV_VAR} and ${ENV_VAR:-default} syntax for secret values.
 
     Args:
         config_path: Path to config file, defaults to config/config.yaml
@@ -139,6 +193,8 @@ def load_config(config_path: Optional[str] = None) -> Config:
 
     with open(config_path, 'r') as f:
         config_data = yaml.safe_load(f)
+
+    config_data = _resolve_env_vars(config_data)
 
     return Config(**config_data)
 

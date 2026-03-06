@@ -351,18 +351,25 @@
             });
         }
 
+        // Escape HTML to prevent XSS
+        function esc(str) {
+            const div = document.createElement('div');
+            div.textContent = String(str ?? '');
+            return div.innerHTML;
+        }
+
         function updateUserTable(data) {
             const tbody = document.getElementById('userTableBody');
             tbody.innerHTML = data.users.map(user => `
                 <tr class="hover:bg-gray-50 dark:hover:bg-immich-gray-800">
                     <td class="py-3 px-4">
-                        <div class="font-medium text-gray-900 dark:text-white">${user.name}</div>
-                        <div class="text-sm text-gray-500 dark:text-immich-gray-400">${user.email}</div>
+                        <div class="font-medium text-gray-900 dark:text-white">${esc(user.name)}</div>
+                        <div class="text-sm text-gray-500 dark:text-immich-gray-400">${esc(user.email)}</div>
                     </td>
-                    <td class="py-3 px-4 text-gray-900 dark:text-white">${user.photos.toLocaleString()}</td>
-                    <td class="py-3 px-4 text-gray-900 dark:text-white">${user.albums}</td>
-                    <td class="py-3 px-4 text-gray-900 dark:text-white">${user.storage}</td>
-                    <td class="py-3 px-4 text-gray-500 dark:text-immich-gray-400">${user.lastActive}</td>
+                    <td class="py-3 px-4 text-gray-900 dark:text-white">${Number(user.photos).toLocaleString()}</td>
+                    <td class="py-3 px-4 text-gray-900 dark:text-white">${Number(user.albums)}</td>
+                    <td class="py-3 px-4 text-gray-900 dark:text-white">${esc(user.storage)}</td>
+                    <td class="py-3 px-4 text-gray-500 dark:text-immich-gray-400">${esc(user.lastActive)}</td>
                 </tr>
             `).join('');
         }

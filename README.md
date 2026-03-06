@@ -11,7 +11,7 @@ This project provides a complete, production-ready ecosystem around [Immich](htt
 - **Automated Backups** - Daily PostgreSQL dumps with 30-day retention
 - **Update Management** - Automated minor updates with rollback capability
 - **System Monitoring** - CPU, RAM, disk I/O metrics with historical data
-- **Alert System** - Email/webhook notifications for critical issues
+- **Alert System** - Email, webhook, and Discord notifications for critical issues
 - **Web Dashboard** - Real-time metrics and manual controls
 
 ### 📸 Photo Curator Assistant
@@ -158,6 +158,195 @@ Configures:
 
 Tests all components and generates comprehensive report.
 
+## 🐳 Docker Compose Layout
+
+The `docker/` directory contains a multi-file Docker Compose setup designed to
+grow alongside your homelab without requiring changes to existing service configs.
+
+### Structure
+
+```
+docker/
+├── .env.example   ← copy to .env, fill in secrets (gitignored)
+├── core.yml       ← defines the shared "homelab" Docker network
+└── immich.yml     ← Immich stack (postgres, redis, server, ML)
+```
+
+Future stacks (Nextcloud, Jellyfin, Ollama) each get their own file and attach
+to the same `homelab` network — no changes needed to `immich.yml`.
+
+### First-time setup
+
+```bash
+cd /opt/homelab          # or wherever you deploy this repo
+cp docker/.env.example docker/.env
+nano docker/.env         # fill in passwords, storage paths, GPU IDs
+
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml up -d
+```
+
+### Everyday commands
+
+```bash
+# Start / restart Immich
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml up -d
+
+# Stop Immich (other stacks keep running)
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml down
+
+# Follow logs
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml logs -f
+
+# Pull image updates (then re-run `up -d` to apply)
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml pull
+```
+
+### GPU assignment
+
+Each GPU-using service has its own variable in `docker/.env`. To change which
+GPU a service uses — including after a hardware swap — edit only the `.env` file:
+
+```bash
+# List GPU indices and UUIDs on your host:
+nvidia-smi --query-gpu=index,name,uuid --format=csv
+
+# Then in docker/.env:
+IMMICH_ML_GPU_ID=0    # index, or a full UUID like GPU-abc123...
+JELLYFIN_GPU_ID=1     # different GPU, no changes to any compose file
+
+# Apply:
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml up -d immich-ml
+```
+
+No GPU / CPU-only mode: remove or comment out the `deploy:` block in
+`docker/immich.yml` under the `immich-ml` service.
+
+### Switching to a mergerfs storage pool (Phase 3)
+
+Update the bind mount in `docker/.env` — no compose file edits needed:
+
+```bash
+# docker/.env
+IMMICH_UPLOAD_LOCATION=/mnt/storage/immich/library
+```
+
+Keep the database (`immich_db_data` named volume) on your OS/SSD drive.
+Random I/O on spinning disks in a mergerfs pool degrades PostgreSQL performance.
+
+### Adding future services
+
+Each new service gets its own compose file. The pattern is always the same:
+
+**1. Create the compose file** (example: `docker/jellyfin.yml`)
+
+```yaml
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    # GPU for hardware transcoding — set JELLYFIN_GPU_ID in docker/.env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${JELLYFIN_GPU_ID:-0}"]
+              capabilities: [gpu]
+    volumes:
+      - ${JELLYFIN_CONFIG_DIR}:/config
+      - ${JELLYFIN_MEDIA_DIR}:/media:ro
+    expose:
+      - "8096"      # no host binding — Caddy routes here by container name
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    external: true
+    name: homelab
+```
+
+**2. Add variables to `docker/.env`**
+
+```bash
+JELLYFIN_GPU_ID=0
+JELLYFIN_CONFIG_DIR=./data/jellyfin/config
+JELLYFIN_MEDIA_DIR=/mnt/storage/media
+```
+
+**3. Start the new stack** (Immich keeps running untouched)
+
+```bash
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/jellyfin.yml up -d
+```
+
+Follow the same pattern for Nextcloud (`nextcloud.yml`) and Ollama (`ollama.yml`).
+
+### Adding a reverse proxy (Caddy)
+
+Create `docker/proxy.yml`. Because all services join the `homelab` network,
+Caddy reaches them by container name without any host port bindings:
+
+```yaml
+# docker/proxy.yml
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - homelab
+
+volumes:
+  caddy_data:
+    name: caddy_data
+  caddy_config:
+    name: caddy_config
+
+networks:
+  homelab:
+    external: true
+    name: homelab
+```
+
+```
+# docker/caddy/Caddyfile
+photos.yourdomain.com {
+    reverse_proxy immich-server:2283
+}
+cloud.yourdomain.com {
+    reverse_proxy nextcloud:80
+}
+media.yourdomain.com {
+    reverse_proxy jellyfin:8096
+}
+ai.yourdomain.com {
+    reverse_proxy ollama:11434
+}
+```
+
+Once Caddy is running, remove the `127.0.0.1:2283:2283` port binding from
+`docker/immich.yml` (change it to `expose: ["2283"]`) so Immich is only
+reachable through the proxy.
+
+---
+
 ## 🔧 Configuration
 
 ### Server Manager
@@ -187,12 +376,56 @@ alerts:
     smtp_password: "your-app-password"
     to:
       - "admin@yourdomain.com"
+  discord:
+    enabled: true
+    webhook_url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL"
+    bot_name: "House of Feuer"
+    server_name: "My Immich Server"  # optional label shown in embeds
+  quiet_hours:
+    enabled: true
+    start: "22:00"
+    end: "08:00"
 ```
 
-**Test email alerts:**
+**Test alerts (sends to all enabled channels):**
 ```bash
 curl -X POST http://localhost:8080/api/test-alert
 ```
+
+### Discord Alerts
+
+Discord webhook alerts are sent as rich embeds with colour-coded severity levels:
+
+| Colour | Severity | Description |
+|--------|----------|-------------|
+| 🔴 Red | Critical | Requires immediate attention |
+| 🟠 Orange | Warning | Degraded but not yet failing |
+| 🔵 Blue | Info | Informational notifications |
+
+**Quiet hours** apply to warning and info alerts (22:00–08:00 by default). Critical alerts are always sent.
+
+#### Alert types sent to Discord
+
+| Alert | Severity | Trigger |
+|-------|----------|---------|
+| **Disk Temperature — Critical** | Critical | Drive temp exceeds `disk_temp_critical` threshold (default 50 °C) |
+| **Disk Temperature — High** | Warning | Drive temp exceeds `disk_temp_warning` threshold (default 45 °C) |
+| **Disk Health — SMART Errors** | Critical / Warning | Reallocated, pending, or uncorrectable sectors detected |
+| **High Disk Usage** | Warning | Filesystem usage exceeds `disk_space_warning` (default 85 %) |
+| **Critical Disk Space** | Critical | Filesystem usage exceeds `disk_space_critical` (default 95 %) |
+| **Backup Completed** | Info | Scheduled or manual backup finished successfully |
+| **Backup Failed** | Critical | Backup job errored out |
+| **Backup Restored** | Info | Database successfully restored from a backup file |
+| **Restore Failed** | Critical | Database restore operation failed |
+| **Immich Containers Down** | Critical | One or more Immich Docker containers stopped unexpectedly |
+| **Immich Containers Recovered** | Info | All containers are running again after a downtime event |
+| **Immich Update Available** | Info | A new Immich release is available on GitHub |
+| **Immich Auto-Updated** | Info | Patch update applied automatically (snapshot kept for rollback) |
+| **Immich Update Failed** | Critical | Auto-update failed and was rolled back |
+| **Immich Updated** | Info | Manual update applied successfully |
+| **Rollback Completed** | Info | Immich rolled back to a previous snapshot |
+| **Rollback Failed** | Critical | Snapshot rollback failed |
+| **Test Alert** | Info | Sent via `POST /api/test-alert` to verify the integration |
 
 ### Photo Curator
 
@@ -395,6 +628,12 @@ immich-manager/
 ├── install.sh                  # Master installation script
 ├── README.md                   # This file
 │
+├── docker/                     # Docker Compose layout (multi-file)
+│   ├── .env.example            # Master env template (copy to .env)
+│   ├── core.yml                # Shared homelab network
+│   ├── immich.yml              # Immich stack (GPU-isolated, proxy-ready)
+│   └── (jellyfin.yml, nextcloud.yml, ollama.yml, proxy.yml — add as needed)
+│
 ├── scripts/
 │   ├── lib/
 │   │   └── state-manager.sh   # Installation state tracking
@@ -412,6 +651,9 @@ immich-manager/
 │   ├── config/                 # Configuration templates
 │   ├── static/                 # Web dashboard
 │   └── requirements.txt
+│
+├── shared/
+│   └── auth/                   # Shared RBAC module
 │
 └── photo-curator/
     ├── src/                    # Python application
@@ -434,6 +676,11 @@ immich-manager/
 - `POST /api/backup/now` - Trigger backup
 - `GET /api/alerts` - Get alerts
 - `POST /api/test-alert` - Send test alert
+- `GET /api/snapshots` - List pre-update snapshots
+- `POST /api/snapshots` - Create manual snapshot
+- `POST /api/snapshots/{id}/rollback` - Roll back to a snapshot
+- `GET /api/updates/history` - Update history
+- `POST /api/updates/apply` - Trigger update to latest version
 
 ### Photo Curator API
 
@@ -475,13 +722,47 @@ MIT License - See LICENSE file for details
 
 ## 🗺️ Roadmap
 
-- [ ] Mobile app for Photo Curator
-- [ ] Advanced AI features (face recognition, scene detection)
-- [ ] Multi-site backup support (S3, Backblaze)
-- [ ] Email digest reports
-- [ ] Telegram/Discord bot integration
-- [ ] Photo book export to Shutterfly/Mixbook
-- [ ] Prometheus/Grafana integration
+> **Effort scale:** XS (<1 day) | S (1–3 days) | M (3–7 days) | L (1–3 weeks) | XL (1+ months)
+
+### ✅ Completed
+- [x] Multi-site backup support (S3, Backblaze)
+- [x] Prometheus metrics endpoint
+- [x] Immich auto-updater — watches for new releases, applies patch updates, snapshot + rollback *(Effort: M)*
+- [x] Discord webhook alerts — rich embeds with severity colours, quiet hours, all system events *(Effort: S)*
+- [x] Advanced AI features — face recognition (128-dim dlib embeddings, greedy identity clustering, user labelling + merge) and scene detection (MobileNetV2-Places365, 10 super-categories) *(Effort: M–L)*
+- [x] Guest access links — temporary expiring share links for non-Immich users *(Effort: S)*
+- [x] Role management — admin, family member, and guest permission tiers *(Effort: L)*
+
+### 🔄 In Progress
+- [~] Prometheus/Grafana integration — Prometheus done; Grafana dashboard config needed *(Effort: XS)*
+
+### 📋 Planned
+
+#### Storage & Performance
+- [ ] Per-user storage quotas — limits, warnings, and upload blocking per user *(Effort: M)*
+- [ ] Video transcoding/compression — automated format conversion and size reduction *(Effort: M)*
+- [ ] Smart cleanup assistant — surface old/low-quality photos for bulk deletion with space savings preview *(Effort: M)*
+
+#### User & Access Management
+- [ ] User onboarding flow — invite family members via email, auto-create Immich accounts *(Effort: M)*
+
+#### Automation & Intelligence
+- [ ] Smart album rules engine — auto-populate albums by date, location, quality score, or face tags *(Effort: L)*
+- [ ] Trip/event detection — cluster photos into trips using GPS + time gap analysis *(Effort: M)*
+- [ ] "On this day" digest emails — photos from this date in past years *(Effort: S)*
+
+#### Import & Export
+- [ ] Additional import sources — Apple Photos, Facebook, Instagram, OneDrive *(Effort: L)*
+- [ ] Photo book PDF export — generate printable PDF locally for upload to any print service *(Effort: L)*
+
+#### Ops & Reliability
+- [ ] Self-update for immich-manager — git pull + restart workflow to keep manager current *(Effort: S)*
+
+#### Notifications & Reporting
+- [ ] Email digest reports — weekly/monthly system health and curation stats summaries *(Effort: S)*
+
+#### Mobile
+- [ ] Mobile app for Photo Curator *(Effort: XL)*
 
 ## 📊 Stats
 

@@ -181,22 +181,30 @@
     <script>
         let refreshInterval;
 
+        // Escape HTML to prevent XSS
+        function esc(str) {
+            const div = document.createElement('div');
+            div.textContent = String(str ?? '');
+            return div.innerHTML;
+        }
+
         async function fetchData() {
             try {
                 const [status, disks, backups, alerts] = await Promise.all([
-                    fetch('/api/status').then(r => r.json()),
-                    fetch('/api/disks').then(r => r.json()),
-                    fetch('/api/backups').then(r => r.json()),
-                    fetch('/api/alerts').then(r => r.json())
+                    fetch('/api/status').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+                    fetch('/api/disks').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+                    fetch('/api/backups').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+                    fetch('/api/alerts').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
                 ]);
 
                 renderDashboard(status, disks, backups, alerts);
             } catch (error) {
-                document.getElementById('content').innerHTML = `
-                    <div class="alert alert-error">
-                        Failed to load data: ${error.message}
-                    </div>
-                `;
+                const el = document.getElementById('content');
+                el.textContent = '';
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-error';
+                alertDiv.textContent = 'Failed to load data. Please check your connection and authentication.';
+                el.appendChild(alertDiv);
             }
         }
 
@@ -210,20 +218,20 @@
                         <h2>🖥️ System Status</h2>
                         <div class="stat">
                             <span class="stat-label">CPU Usage</span>
-                            <span class="stat-value ${system.cpu_percent > 80 ? 'status-warning' : 'status-ok'}">
-                                ${system.cpu_percent.toFixed(1)}%
+                            <span class="stat-value ${Number(system.cpu_percent) > 80 ? 'status-warning' : 'status-ok'}">
+                                ${Number(system.cpu_percent).toFixed(1)}%
                             </span>
                         </div>
                         <div class="stat">
                             <span class="stat-label">Memory Usage</span>
-                            <span class="stat-value ${system.memory_percent > 80 ? 'status-warning' : 'status-ok'}">
-                                ${system.memory_percent.toFixed(1)}% (${system.memory_used_gb.toFixed(1)} GB)
+                            <span class="stat-value ${Number(system.memory_percent) > 80 ? 'status-warning' : 'status-ok'}">
+                                ${Number(system.memory_percent).toFixed(1)}% (${Number(system.memory_used_gb).toFixed(1)} GB)
                             </span>
                         </div>
                         <div class="stat">
                             <span class="stat-label">Disk Usage</span>
-                            <span class="stat-value ${system.disk_usage_percent > 85 ? 'status-warning' : 'status-ok'}">
-                                ${system.disk_usage_percent.toFixed(1)}% (${system.disk_used_gb.toFixed(1)} GB)
+                            <span class="stat-value ${Number(system.disk_usage_percent) > 85 ? 'status-warning' : 'status-ok'}">
+                                ${Number(system.disk_usage_percent).toFixed(1)}% (${Number(system.disk_used_gb).toFixed(1)} GB)
                             </span>
                         </div>
                     </div>
@@ -238,17 +246,17 @@
                         </div>
                         <div class="stat">
                             <span class="stat-label">Containers</span>
-                            <span class="stat-value">${status.containers.length} running</span>
+                            <span class="stat-value">${Number(status.containers.length)} running</span>
                         </div>
                     </div>
 
                     <div class="card">
                         <h2>💾 Disk Health</h2>
-                        ${disks.disks.map(disk => `
+                        ${(disks.disks || []).map(disk => `
                             <div class="stat">
-                                <span class="stat-label">${disk.device}</span>
+                                <span class="stat-label">${esc(disk.device)}</span>
                                 <span class="stat-value ${disk.smart_status ? 'status-ok' : 'status-error'}">
-                                    ${disk.temperature ? disk.temperature + '°C' : 'N/A'}
+                                    ${disk.temperature ? Number(disk.temperature) + '°C' : 'N/A'}
                                 </span>
                             </div>
                         `).join('') || '<p>No disk data available</p>'}
@@ -256,11 +264,11 @@
 
                     <div class="card">
                         <h2>💿 Backups</h2>
-                        ${backups.history.slice(0, 3).map(backup => `
+                        ${(backups.history || []).slice(0, 3).map(backup => `
                             <div class="stat">
-                                <span class="stat-label">${new Date(backup.timestamp).toLocaleDateString()}</span>
+                                <span class="stat-label">${esc(new Date(backup.timestamp).toLocaleDateString())}</span>
                                 <span class="stat-value ${backup.status === 'success' ? 'status-ok' : 'status-error'}">
-                                    ${backup.status}
+                                    ${esc(backup.status)}
                                 </span>
                             </div>
                         `).join('') || '<p>No backups yet</p>'}
@@ -268,14 +276,14 @@
                     </div>
                 </div>
 
-                ${alerts.alerts.length > 0 ? `
+                ${(alerts.alerts || []).length > 0 ? `
                     <div class="card">
                         <h2>🔔 Recent Alerts</h2>
                         ${alerts.alerts.slice(0, 5).map(alert => `
-                            <div class="alert alert-${alert.severity === 'critical' ? 'error' : alert.severity}">
-                                <strong>${alert.category}:</strong> ${alert.message}
+                            <div class="alert alert-${alert.severity === 'critical' ? 'error' : esc(alert.severity)}">
+                                <strong>${esc(alert.category)}:</strong> ${esc(alert.message)}
                                 <small style="display:block;margin-top:5px;opacity:0.7;">
-                                    ${new Date(alert.timestamp).toLocaleString()}
+                                    ${esc(new Date(alert.timestamp).toLocaleString())}
                                 </small>
                             </div>
                         `).join('')}
@@ -290,9 +298,9 @@
             try {
                 const response = await fetch('/api/backup/now', { method: 'POST' });
                 const data = await response.json();
-                alert('Backup started! Check the backups section for progress.');
+                window.alert('Backup started! Check the backups section for progress.');
             } catch (error) {
-                alert('Failed to start backup: ' + error.message);
+                window.alert('Failed to start backup.');
             }
         }
 
