@@ -275,6 +275,33 @@ curl "http://localhost:8081/api/photos/2024/1" \
 
 ---
 
+### ✅ Web Import Wizard
+**Component:** `photo-curator/static/import.html`, `photo-curator/src/main.py`
+**API:** `POST /api/import/upload`, `POST /api/import/start`, `GET /api/import/jobs`, `GET /api/import/jobs/{id}`, `DELETE /api/import/jobs/{id}`
+**Access:** `/import` (Immich SSO required)
+
+Browser-based import wizard for Google Photos, Apple Photos, and iCloud exports. Any user can upload files via browser drag-and-drop; admins can also specify a server filesystem path for large libraries pre-transferred via SFTP/rsync. Background processing with real-time progress polling, cancellation support, and import history.
+
+**Validate:**
+```bash
+# Check the import page loads
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/import \
+  -H "Cookie: immich_access_token=YOUR_TOKEN"
+# Should return 200
+
+# List import jobs
+curl http://localhost:8081/api/import/jobs \
+  -H "Cookie: immich_access_token=YOUR_TOKEN" | jq '.jobs'
+
+# Start a server-path import (admin only)
+curl -X POST http://localhost:8081/api/import/start \
+  -H "Cookie: immich_access_token=YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source_type":"google","server_path":"/path/to/Takeout"}' | jq
+```
+
+---
+
 ## Health Monitor Features
 
 ### ✅ Self-Healing Service Monitor
@@ -350,6 +377,42 @@ python google-photos-import.py \
 
 ---
 
+### ✅ Apple Photos Migration Tool
+**Component:** `migration-tools/apple-photos-import.py`
+
+Imports Apple Photos.app exports to Immich. Reads EXIF metadata (capture dates, GPS) from JPEG/PNG/HEIC files using Pillow. Detects and skips Live Photo companion `.MOV` files by default. Resumable.
+
+**Validate:**
+```bash
+cd migration-tools
+python apple-photos-import.py --help
+# Export a small album from Photos.app first, then test:
+python apple-photos-import.py \
+  --photos-dir ~/Desktop/ApplePhotosExport \
+  --immich-url http://localhost:2283 \
+  --api-key YOUR_KEY
+```
+
+---
+
+### ✅ iCloud Photos Migration Tool
+**Component:** `migration-tools/icloud-import.py`
+
+Imports iCloud data exports (from privacy.apple.com) to Immich. Reads EXIF metadata from files; falls back to year/month inferred from export directory names when EXIF is absent. Auto-detects the photos folder within Apple's export structure. Resumable.
+
+**Validate:**
+```bash
+cd migration-tools
+python icloud-import.py --help
+# Point at the extracted Apple data export:
+python icloud-import.py \
+  --export-dir ~/Downloads/Apple_Media_Services \
+  --immich-url http://localhost:2283 \
+  --api-key YOUR_KEY
+```
+
+---
+
 ## Planned Features
 
 | Feature | Notes |
@@ -361,7 +424,7 @@ python google-photos-import.py \
 | 📋 Smart album rules engine | Auto-populate by date, location, quality, face tags |
 | 📋 Trip/event detection | GPS + time gap clustering |
 | 📋 "On this day" digest emails | Photos from this date in past years |
-| 📋 Additional import sources | Apple Photos, Facebook, Instagram, OneDrive |
+| 📋 Additional import sources | Facebook, Instagram, OneDrive, Amazon Photos |
 | 📋 Photo book PDF export | Printable PDF for local upload to print services |
 | 📋 Self-update for immich-manager | git pull + restart workflow |
 | 📋 Email digest reports | Weekly/monthly health and curation summaries |

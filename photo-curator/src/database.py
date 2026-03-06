@@ -134,6 +134,30 @@ MIGRATIONS: List[tuple] = [
         "CREATE INDEX IF NOT EXISTS idx_scene_user ON scene_classifications(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_scene_category ON scene_classifications(scene_category)",
     ]),
+    # Version 5: import jobs for web-based photo import
+    (5, "add import_jobs table", [
+        """CREATE TABLE IF NOT EXISTS import_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            import_method TEXT NOT NULL,
+            server_path TEXT,
+            staging_dir TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            total_files INTEGER DEFAULT 0,
+            uploaded INTEGER DEFAULT 0,
+            skipped INTEGER DEFAULT 0,
+            errors INTEGER DEFAULT 0,
+            duplicates INTEGER DEFAULT 0,
+            error_message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            started_at DATETIME,
+            completed_at DATETIME,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_import_jobs_user ON import_jobs(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)",
+    ]),
 ]
 
 
@@ -1297,5 +1321,88 @@ class Database:
                 "SELECT * FROM share_access_log WHERE share_id = ? "
                 "ORDER BY accessed_at DESC LIMIT ?",
                 (share_id, limit),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Import jobs
+    # ------------------------------------------------------------------
+
+    def create_import_job(
+        self,
+        user_id: str,
+        source_type: str,
+        import_method: str,
+        server_path: Optional[str] = None,
+        staging_dir: Optional[str] = None,
+    ) -> int:
+        """Create a new import job and return its ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO import_jobs
+                       (user_id, source_type, import_method, server_path, staging_dir)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, source_type, import_method, server_path, staging_dir),
+            )
+            return cursor.lastrowid
+
+    def update_import_job_progress(self, job_id: int, stats: Dict[str, Any]):
+        """Update progress counters and optionally status for an import job."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            fields = []
+            values: list = []
+            for col in ("total_files", "uploaded", "skipped", "errors", "duplicates"):
+                if col in stats:
+                    fields.append(f"{col} = ?")
+                    values.append(stats[col])
+            if "status" in stats:
+                fields.append("status = ?")
+                values.append(stats["status"])
+                if stats["status"] == "running" and "started_at" not in stats:
+                    fields.append("started_at = COALESCE(started_at, CURRENT_TIMESTAMP)")
+            fields.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(job_id)
+            cursor.execute(
+                f"UPDATE import_jobs SET {', '.join(fields)} WHERE id = ?",
+                values,
+            )
+
+    def update_import_job_status(
+        self, job_id: int, status: str, error_message: Optional[str] = None
+    ):
+        """Set job status (and optionally error message). Marks completed_at for terminal states."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if status in ("completed", "failed", "cancelled"):
+                cursor.execute(
+                    "UPDATE import_jobs SET status = ?, error_message = ?, "
+                    "completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?",
+                    (status, error_message, job_id),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE import_jobs SET status = ?, error_message = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (status, error_message, job_id),
+                )
+
+    def get_import_job(self, job_id: int) -> Optional[Dict[str, Any]]:
+        """Return a single import job or None."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM import_jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_import_jobs_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Return all import jobs for a user, newest first."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM import_jobs WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
             )
             return [dict(r) for r in cursor.fetchall()]
