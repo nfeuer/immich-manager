@@ -4,7 +4,7 @@ Complete AI-powered photo curation with Immich authentication integration
 """
 
 import sys
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends, Form, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -20,6 +20,10 @@ import yaml
 import logging
 import asyncio
 import re
+import threading
+import uuid
+import shutil
+import importlib.util
 import sdnotify
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -1271,6 +1275,24 @@ class RoleUpdate(BaseModel):
     role: str  # "admin", "user", or "guest"
 
 
+class ServerPathImport(BaseModel):
+    source_type: str  # "google", "apple", "icloud"
+    server_path: str  # Filesystem path on server
+
+
+# ------------------------------------------------------------------
+# Import job cancellation events (module-level, shared across requests)
+# ------------------------------------------------------------------
+_import_cancel_events: Dict[int, threading.Event] = {}
+
+IMPORT_STAGING_BASE = Path("data/import-staging")
+
+BLOCKED_SERVER_PATHS = frozenset([
+    "/", "/etc", "/root", "/var", "/usr", "/bin", "/sbin",
+    "/boot", "/dev", "/proc", "/sys",
+])
+
+
 @app.post("/api/albums/{album_id}/shares")
 @limiter.limit("10/minute")
 async def create_album_share(
@@ -1735,6 +1757,290 @@ async def get_scene_distribution(
         "labels": list(distribution.keys()),
         "values": list(distribution.values()),
     }
+
+
+# ------------------------------------------------------------------
+# Import helpers & background task
+# ------------------------------------------------------------------
+
+def _load_importer_class(source_type: str):
+    """Dynamically load an importer class from the migration-tools directory."""
+    base = Path(__file__).resolve().parent.parent.parent / "migration-tools"
+    file_map = {
+        "google": ("google-photos-import.py", "GooglePhotosImporter"),
+        "apple": ("apple-photos-import.py", "ApplePhotosImporter"),
+        "icloud": ("icloud-import.py", "ICloudImporter"),
+    }
+    filename, class_name = file_map[source_type]
+    spec = importlib.util.spec_from_file_location(
+        f"migration_{source_type}", base / filename
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return getattr(mod, class_name)
+
+
+def _run_import_sync(
+    job_id: int,
+    user_id: str,
+    user_token: str,
+    source_type: str,
+    directory: str,
+    import_method: str,
+):
+    """Run an import job synchronously (called via BackgroundTasks)."""
+    try:
+        immich_url = app.state.immich_base_url
+        ImporterClass = _load_importer_class(source_type)
+
+        # Create importer — SSO token works as api_key for Immich API
+        if source_type == "google":
+            importer = ImporterClass(Path(directory), immich_url, user_token)
+        elif source_type == "apple":
+            importer = ImporterClass(Path(directory), immich_url, user_token)
+        elif source_type == "icloud":
+            importer = ImporterClass(Path(directory), immich_url, user_token)
+        else:
+            database.update_import_job_status(job_id, "failed", f"Unknown source: {source_type}")
+            return
+
+        # Override progress file so it doesn't pollute cwd
+        importer.progress_file = Path(directory) / f"{source_type}-import-progress.json"
+
+        # -- Scan phase --
+        database.update_import_job_status(job_id, "scanning")
+
+        if source_type == "google":
+            photos_dir = importer.find_google_photos_dir()
+            if not photos_dir:
+                database.update_import_job_status(job_id, "failed", "Could not find Google Photos directory in export")
+                return
+            photo_files = [
+                f for f in photos_dir.rglob("*")
+                if importer.is_supported_file(f) and not str(f).endswith(".json")
+            ]
+        elif source_type == "apple":
+            photo_files = importer._scan_files()
+        else:  # icloud
+            photos_root = importer.find_photos_root()
+            from pathlib import Path as _P  # already imported, but for clarity
+            icloud_exts = {
+                '.jpg', '.jpeg', '.png', '.gif', '.webp', '.tiff', '.bmp',
+                '.heic', '.heif', '.dng', '.raw', '.arw', '.cr2', '.cr3', '.nef',
+                '.mp4', '.mov', '.avi', '.mkv', '.m4v',
+            }
+            photo_files = [
+                p for p in photos_root.rglob("*")
+                if p.is_file() and p.suffix.lower() in icloud_exts
+            ]
+
+        importer.stats["total_files"] = len(photo_files)
+        database.update_import_job_progress(job_id, {**importer.stats, "status": "running"})
+
+        if not photo_files:
+            database.update_import_job_status(job_id, "completed", "No files found to import")
+            return
+
+        # -- Upload loop --
+        cancel_event = _import_cancel_events.get(job_id)
+        for i, photo_path in enumerate(photo_files):
+            if cancel_event and cancel_event.is_set():
+                database.update_import_job_status(job_id, "cancelled")
+                break
+
+            if source_type == "google":
+                metadata_json = importer.find_photo_metadata(photo_path)
+                metadata = importer.extract_metadata(metadata_json) if metadata_json else None
+                importer.upload_file(photo_path, metadata)
+            elif source_type == "apple":
+                importer._upload_file(photo_path)
+            else:  # icloud
+                importer._upload_file(photo_path, photos_root)
+
+            # Update DB every 10 files
+            if (i + 1) % 10 == 0:
+                database.update_import_job_progress(job_id, importer.stats)
+        else:
+            # Loop completed without cancel
+            database.update_import_job_progress(
+                job_id, {**importer.stats, "status": "completed"}
+            )
+            database.update_import_job_status(job_id, "completed")
+
+    except Exception as e:
+        logger.error(f"Import job {job_id} failed: {e}", exc_info=True)
+        database.update_import_job_status(job_id, "failed", str(e))
+    finally:
+        _import_cancel_events.pop(job_id, None)
+        # Clean up staging dir for browser uploads
+        if import_method == "upload":
+            shutil.rmtree(directory, ignore_errors=True)
+
+
+# ------------------------------------------------------------------
+# Import endpoints
+# ------------------------------------------------------------------
+
+@app.get("/import", response_class=HTMLResponse)
+async def import_ui(request: Request, user: Dict = Depends(require_user_page)):
+    """Serve import wizard UI."""
+    html_path = Path(__file__).parent.parent / "static" / "import.html"
+    if html_path.exists():
+        return html_path.read_text()
+    return HTMLResponse("<h1>Import page not found</h1>", status_code=404)
+
+
+@app.post("/api/import/upload")
+@limiter.limit("10/minute")
+async def upload_import_files(
+    request: Request,
+    source_type: str = Form(...),
+    files: List[UploadFile] = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Upload files via browser and start an import job."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    if source_type not in ("google", "apple", "icloud"):
+        raise HTTPException(status_code=400, detail="source_type must be google, apple, or icloud")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    # Create staging directory
+    staging_dir = IMPORT_STAGING_BASE / user["id"] / str(uuid.uuid4())
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        for upload_file in files:
+            # webkitdirectory uploads include relative paths in filename
+            relative_path = Path(upload_file.filename) if upload_file.filename else Path(f"file_{uuid.uuid4()}")
+            dest = staging_dir / relative_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with open(dest, "wb") as f:
+                while chunk := await upload_file.read(1024 * 1024):
+                    f.write(chunk)
+    except Exception as e:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"File save failed: {e}")
+
+    job_id = database.create_import_job(
+        user_id=user["id"],
+        source_type=source_type,
+        import_method="upload",
+        staging_dir=str(staging_dir),
+    )
+    _import_cancel_events[job_id] = threading.Event()
+
+    background_tasks.add_task(
+        _run_import_sync,
+        job_id, user["id"], user["access_token"],
+        source_type, str(staging_dir), "upload",
+    )
+
+    return {"job_id": job_id, "status": "started", "file_count": len(files)}
+
+
+@app.post("/api/import/start")
+@limiter.limit("5/minute")
+async def start_server_path_import(
+    request: Request,
+    body: ServerPathImport,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Start an import from a server filesystem path (admin only)."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    if body.source_type not in ("google", "apple", "icloud"):
+        raise HTTPException(status_code=400, detail="source_type must be google, apple, or icloud")
+
+    server_path = Path(body.server_path)
+    if not server_path.exists() or not server_path.is_dir():
+        raise HTTPException(status_code=400, detail="Server path does not exist or is not a directory")
+
+    resolved = str(server_path.resolve())
+    if resolved in BLOCKED_SERVER_PATHS:
+        raise HTTPException(status_code=400, detail="Path not allowed")
+
+    job_id = database.create_import_job(
+        user_id=user["id"],
+        source_type=body.source_type,
+        import_method="server_path",
+        server_path=resolved,
+    )
+    _import_cancel_events[job_id] = threading.Event()
+
+    background_tasks.add_task(
+        _run_import_sync,
+        job_id, user["id"], user["access_token"],
+        body.source_type, resolved, "server_path",
+    )
+
+    return {"job_id": job_id, "status": "started"}
+
+
+@app.get("/api/import/jobs")
+@limiter.limit("30/minute")
+async def list_import_jobs(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """List all import jobs for the authenticated user."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    jobs = database.get_import_jobs_for_user(user["id"])
+    return {"jobs": jobs}
+
+
+@app.get("/api/import/jobs/{job_id}")
+@limiter.limit("60/minute")
+async def get_import_job_status(
+    request: Request,
+    job_id: int,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Get status and progress of an import job."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    job = database.get_import_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return job
+
+
+@app.delete("/api/import/jobs/{job_id}")
+@limiter.limit("10/minute")
+async def cancel_import_job(
+    request: Request,
+    job_id: int,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Cancel a running import job."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    job = database.get_import_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if job["status"] not in ("pending", "scanning", "running"):
+        raise HTTPException(status_code=400, detail="Job is not running")
+
+    cancel_event = _import_cancel_events.get(job_id)
+    if cancel_event:
+        cancel_event.set()
+    else:
+        database.update_import_job_status(job_id, "cancelled")
+
+    return {"status": "cancelling", "job_id": job_id}
 
 
 def main():

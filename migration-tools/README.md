@@ -2,6 +2,26 @@
 
 Tools for importing photos from various services into Immich.
 
+| Script | Source | Metadata |
+|--------|--------|----------|
+| `google-photos-import.py` | Google Takeout export | JSON sidecar files |
+| `apple-photos-import.py` | Apple Photos.app export | Embedded EXIF |
+| `icloud-import.py` | iCloud data export (privacy.apple.com) | Embedded EXIF + directory names |
+
+---
+
+## Prerequisites (all importers)
+
+1. **Python 3.9+**
+2. **Immich API Key** — Immich → Settings → API Keys → Create
+3. **Install dependencies:**
+   ```bash
+   cd migration-tools
+   pip install -r requirements.txt
+   ```
+
+---
+
 ## Google Photos Import
 
 Import your complete Google Photos library into Immich while preserving:
@@ -171,12 +191,126 @@ Delete this file to start fresh (will re-upload everything).
 - TODO: Add album import in future version
 - Create albums manually in Immich after import
 
+---
+
+## Apple Photos Import
+
+Import photos exported from the **Photos.app on macOS** to Immich, preserving EXIF metadata (capture dates, GPS).
+
+### How to Export from Photos.app
+
+1. Open **Photos.app** on macOS
+2. Select all photos (`Cmd+A`) or a specific album
+3. **File → Export → Export Unmodified Originals**
+4. Choose a destination folder
+5. Run this script pointing at that folder
+
+### Usage
+
+```bash
+python apple-photos-import.py \
+  --photos-dir ~/Desktop/ApplePhotosExport \
+  --immich-url http://localhost:2283 \
+  --api-key YOUR_API_KEY
+```
+
+**Include Live Photo companion videos** (skipped by default):
+```bash
+python apple-photos-import.py \
+  --photos-dir ~/Desktop/ApplePhotosExport \
+  --immich-url http://localhost:2283 \
+  --api-key YOUR_API_KEY \
+  --include-live-videos
+```
+
+**Resume an interrupted import** — just re-run the same command. Progress is saved in `apple-import-progress.json`.
+
+### Features
+
+✅ **EXIF Metadata** — Reads capture date and GPS from JPEG/PNG/HEIC files (requires Pillow)
+✅ **HEIC Support** — Uploads Apple's native HEIC/HEIF format
+✅ **Live Photo handling** — Companion `.MOV` files are detected and skipped by default
+✅ **Progress tracking** — Resumable via `apple-import-progress.json`
+✅ **Duplicate detection** — Skips already-uploaded files
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--photos-dir` | required | Path to Apple Photos export folder |
+| `--immich-url` | required | Immich server URL |
+| `--api-key` | required | Immich API key |
+| `--include-live-videos` | off | Upload `.MOV` companion of Live Photos |
+| `--batch-size` | 100 | Progress save interval (files) |
+| `--delay` | 0.1 | Seconds between uploads |
+
+---
+
+## iCloud Photos Import
+
+Import photos from an **Apple data export** (requested via [privacy.apple.com](https://privacy.apple.com)).
+
+### How to Get Your iCloud Export
+
+1. Go to **https://privacy.apple.com** and sign in with your Apple ID
+2. Click **"Request a copy of your data"**
+3. Select **"iCloud Photos"**
+4. Choose maximum file size and submit the request
+5. Apple emails a download link within **1–7 days** (large libraries take longer)
+6. Download all parts and extract the ZIP file(s)
+
+### Usage
+
+```bash
+python icloud-import.py \
+  --export-dir ~/Downloads/Apple_Media_Services \
+  --immich-url http://localhost:2283 \
+  --api-key YOUR_API_KEY
+```
+
+**Resume an interrupted import** — just re-run the same command. Progress is saved in `icloud-import-progress.json`.
+
+### Typical Export Structure
+
+```
+Apple_Media_Services/
+  iCloud Photos/
+    Photos/
+      2020/
+        IMG_1234.HEIC
+        IMG_5678.HEIC
+      2021/
+        ...
+```
+
+The script auto-detects the photos directory within the export. If it can't find it, it falls back to scanning the entire export folder.
+
+### Features
+
+✅ **EXIF Metadata** — Reads capture date and GPS from files (requires Pillow)
+✅ **Directory date fallback** — Infers year/month from folder names (e.g., `2023/`, `2023-06/`) when EXIF is absent
+✅ **HEIC Support** — Uploads Apple's native HEIC/HEIF format
+✅ **Auto-detection** — Finds the photos folder inside the Apple export automatically
+✅ **Progress tracking** — Resumable via `icloud-import-progress.json`
+✅ **Duplicate detection** — Skips already-uploaded files
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--export-dir` | required | Path to extracted Apple data export |
+| `--immich-url` | required | Immich server URL |
+| `--api-key` | required | Immich API key |
+| `--batch-size` | 100 | Progress save interval (files) |
+| `--delay` | 0.1 | Seconds between uploads |
+
+---
+
 ## Future Migration Tools
 
 ### Planned Importers
 
 - [ ] **Amazon Photos** - Import from Amazon Photos export
-- [ ] **iCloud Photos** - Import from iCloud download
 - [ ] **Facebook Photos** - Import from Facebook export
 - [ ] **Flickr** - Import via Flickr API
 - [ ] **Local Directory** - Bulk import from file system
