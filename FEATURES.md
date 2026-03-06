@@ -304,6 +304,41 @@ curl -X POST http://localhost:8081/api/import/start \
 
 ---
 
+### ✅ Events & Trips Detection
+**Component:** `photo-curator/static/events.html`, `photo-curator/src/main.py`, `photo-curator/src/database.py` (migration v6), `photo-curator/src/immich_client.py`
+**API:** `GET /api/events`, `POST /api/events/detect`, `POST /api/events/{id}/dismiss`, `POST /api/events/{id}/create-album`
+**Access:** `/events` (Immich SSO required)
+
+Scans a user's photos for time-based clusters (photos within a 4-hour window = one event). Clusters with fewer than 20 photos are silently ignored. Each qualifying cluster is labelled "Trip" (≥ 2 days) or "Event" (1 day) and displayed as a card with a thumbnail, date range, and photo count. Users must explicitly confirm before any album is created. Dismissed suggestions are permanently hidden and will not reappear on re-scan.
+
+**Validate:**
+```bash
+# Check the events page loads
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/events \
+  -H "Cookie: immich_access_token=YOUR_TOKEN"
+# Should return 200
+
+# Run detection for current year
+curl -X POST "http://localhost:8081/api/events/detect" \
+  -H "Cookie: immich_access_token=YOUR_TOKEN" | jq '{detected, scanned, events: (.events | length)}'
+
+# List saved suggestions
+curl http://localhost:8081/api/events \
+  -H "Cookie: immich_access_token=YOUR_TOKEN" | jq '.events[] | {id, title, photo_count}'
+
+# Create an album from suggestion 1
+curl -X POST http://localhost:8081/api/events/1/create-album \
+  -H "Cookie: immich_access_token=YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"album_name":"Summer Trip 2024"}' | jq '.status'
+
+# Dismiss suggestion 2 (permanent, won't reappear)
+curl -X POST http://localhost:8081/api/events/2/dismiss \
+  -H "Cookie: immich_access_token=YOUR_TOKEN" | jq '.status'
+```
+
+---
+
 ## Health Monitor Features
 
 ### ✅ Self-Healing Service Monitor

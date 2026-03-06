@@ -158,6 +158,29 @@ MIGRATIONS: List[tuple] = [
         "CREATE INDEX IF NOT EXISTS idx_import_jobs_user ON import_jobs(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)",
     ]),
+    # Version 6: event/trip suggestions for auto-detected photo clusters
+    (6, "add event_suggestions table", [
+        """CREATE TABLE IF NOT EXISTS event_suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            photo_count INTEGER NOT NULL,
+            thumbnail_asset_id TEXT NOT NULL,
+            asset_ids TEXT NOT NULL,
+            dismissed INTEGER DEFAULT 0,
+            album_created INTEGER DEFAULT 0,
+            album_id TEXT,
+            detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, start_date, end_date)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_event_sugg_user ON event_suggestions(user_id)",
+    ]),
+    # Version 7: add participants column to event_suggestions (labeled face names)
+    (7, "add participants column to event_suggestions", [
+        "ALTER TABLE event_suggestions ADD COLUMN participants TEXT",
+    ]),
 ]
 
 
@@ -1406,3 +1429,149 @@ class Database:
                 (user_id,),
             )
             return [dict(r) for r in cursor.fetchall()]
+
+    # ── Event / Trip Suggestions ─────────────────────────────────────────────
+
+    def save_event_suggestions(self, user_id: str, events: List[Dict[str, Any]]):
+        """Upsert a list of detected event suggestions.
+
+        Rows whose (user_id, start_date, end_date) already exist are updated
+        only when they haven't been dismissed or turned into an album yet.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for evt in events:
+                cursor.execute(
+                    """INSERT INTO event_suggestions
+                           (user_id, title, start_date, end_date, photo_count,
+                            thumbnail_asset_id, asset_ids, participants)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(user_id, start_date, end_date) DO UPDATE SET
+                           title              = excluded.title,
+                           photo_count        = excluded.photo_count,
+                           thumbnail_asset_id = excluded.thumbnail_asset_id,
+                           asset_ids          = excluded.asset_ids,
+                           participants       = excluded.participants,
+                           detected_at        = CURRENT_TIMESTAMP
+                       WHERE dismissed = 0 AND album_created = 0""",
+                    (
+                        user_id,
+                        evt["title"],
+                        evt["start_date"],
+                        evt["end_date"],
+                        evt["photo_count"],
+                        evt["thumbnail_asset_id"],
+                        json.dumps(evt["asset_ids"]),
+                        json.dumps(evt.get("participants") or []),
+                    ),
+                )
+
+    def get_event_suggestions(self, user_id: str) -> List[Dict[str, Any]]:
+        """Return non-dismissed, non-completed suggestions for a user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM event_suggestions
+                   WHERE user_id = ?
+                     AND dismissed = 0
+                     AND album_created = 0
+                   ORDER BY start_date DESC""",
+                (user_id,),
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+            for row in rows:
+                if isinstance(row.get("asset_ids"), str):
+                    row["asset_ids"] = json.loads(row["asset_ids"])
+                if isinstance(row.get("participants"), str):
+                    row["participants"] = json.loads(row["participants"])
+                elif row.get("participants") is None:
+                    row["participants"] = []
+            return rows
+
+    def dismiss_event_suggestion(self, user_id: str, event_id: int) -> bool:
+        """Permanently hide a suggestion so it never reappears."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE event_suggestions SET dismissed = 1 WHERE id = ? AND user_id = ?",
+                (event_id, user_id),
+            )
+            return cursor.rowcount > 0
+
+    def mark_event_album_created(self, user_id: str, event_id: int, album_id: str) -> bool:
+        """Mark a suggestion as completed after the album is created."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE event_suggestions
+                   SET album_created = 1, album_id = ?
+                   WHERE id = ? AND user_id = ?""",
+                (album_id, event_id, user_id),
+            )
+            return cursor.rowcount > 0
+
+    def get_scene_distribution_for_assets(
+        self, user_id: str, asset_ids: List[str]
+    ) -> Dict[str, int]:
+        """Return {scene_category: photo_count} for a batch of asset_ids."""
+        if not asset_ids:
+            return {}
+        placeholders = ",".join("?" * len(asset_ids))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT scene_category, COUNT(*) AS cnt
+                    FROM scene_classifications
+                    WHERE user_id = ? AND asset_id IN ({placeholders})
+                    GROUP BY scene_category
+                    ORDER BY cnt DESC""",
+                [user_id] + list(asset_ids),
+            )
+            return {row["scene_category"]: row["cnt"] for row in cursor.fetchall()}
+
+    def get_labeled_faces_for_assets(
+        self, user_id: str, asset_ids: List[str], min_photos: int = 2
+    ) -> List[str]:
+        """Return labeled face identity names that appear in ≥ min_photos of the given assets.
+
+        Results are sorted by number of photos descending (most prominent person first).
+        Only identities with a user-assigned label are returned.
+        """
+        if not asset_ids:
+            return []
+        placeholders = ",".join("?" * len(asset_ids))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT fi.label, COUNT(DISTINCT fe.asset_id) AS photo_count
+                    FROM face_embeddings fe
+                    JOIN face_identities fi ON fe.identity_id = fi.id
+                    WHERE fe.user_id = ?
+                      AND fe.asset_id IN ({placeholders})
+                      AND fi.label IS NOT NULL
+                      AND fi.label != ''
+                    GROUP BY fi.id, fi.label
+                    HAVING photo_count >= ?
+                    ORDER BY photo_count DESC""",
+                [user_id] + list(asset_ids) + [min_photos],
+            )
+            return [row["label"] for row in cursor.fetchall()]
+
+    def get_best_scored_asset(
+        self, user_id: str, asset_ids: List[str]
+    ) -> Optional[str]:
+        """Return the asset_id with the highest AI quality score from the given list."""
+        if not asset_ids:
+            return None
+        placeholders = ",".join("?" * len(asset_ids))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT asset_id FROM photo_scores
+                    WHERE user_id = ? AND asset_id IN ({placeholders})
+                    ORDER BY score DESC
+                    LIMIT 1""",
+                [user_id] + list(asset_ids),
+            )
+            row = cursor.fetchone()
+            return row["asset_id"] if row else None
