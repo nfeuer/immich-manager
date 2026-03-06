@@ -88,6 +88,52 @@ MIGRATIONS: List[tuple] = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_access_log_share ON share_access_log(share_id)",
     ]),
+    # Version 4: face recognition and scene detection tables
+    (4, "add face recognition and scene detection tables", [
+        # face_identities must be created before face_embeddings (FK reference)
+        """CREATE TABLE IF NOT EXISTS face_identities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            label TEXT,
+            representative_embedding BLOB,
+            photo_count INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_face_ident_user ON face_identities(user_id)",
+        """CREATE TABLE IF NOT EXISTS face_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            face_index INTEGER NOT NULL DEFAULT 0,
+            embedding BLOB NOT NULL,
+            bbox_x INTEGER,
+            bbox_y INTEGER,
+            bbox_w INTEGER,
+            bbox_h INTEGER,
+            identity_id INTEGER,
+            confidence REAL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(asset_id, face_index),
+            FOREIGN KEY (identity_id) REFERENCES face_identities(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_face_emb_asset ON face_embeddings(asset_id)",
+        "CREATE INDEX IF NOT EXISTS idx_face_emb_user ON face_embeddings(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_face_emb_identity ON face_embeddings(identity_id)",
+        """CREATE TABLE IF NOT EXISTS scene_classifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id TEXT NOT NULL UNIQUE,
+            user_id TEXT NOT NULL,
+            scene_category TEXT NOT NULL,
+            scene_subcategory TEXT,
+            confidence REAL,
+            top3_scenes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_scene_asset ON scene_classifications(asset_id)",
+        "CREATE INDEX IF NOT EXISTS idx_scene_user ON scene_classifications(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_scene_category ON scene_classifications(scene_category)",
+    ]),
 ]
 
 
@@ -962,6 +1008,277 @@ class Database:
                 (contribution_id, album_id),
             )
             return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Face Recognition
+    # ------------------------------------------------------------------
+
+    def save_face_embedding(
+        self,
+        asset_id: str,
+        user_id: str,
+        face_index: int,
+        embedding_bytes: bytes,
+        bbox: tuple,
+        identity_id: Optional[int] = None,
+        confidence: Optional[float] = None,
+    ) -> int:
+        """Save or replace a face embedding for one detected face. Returns row id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            x, y, w, h = bbox
+            cursor.execute(
+                """INSERT OR REPLACE INTO face_embeddings
+                       (asset_id, user_id, face_index, embedding,
+                        bbox_x, bbox_y, bbox_w, bbox_h,
+                        identity_id, confidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (asset_id, user_id, face_index, embedding_bytes,
+                 x, y, w, h, identity_id, confidence),
+            )
+            return cursor.lastrowid
+
+    def get_face_embeddings_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get all face embeddings for a user (used for clustering)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT id, asset_id, face_index, embedding,
+                          bbox_x, bbox_y, bbox_w, bbox_h,
+                          identity_id, confidence
+                   FROM face_embeddings WHERE user_id = ?""",
+                (user_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_face_embeddings_for_asset(self, asset_id: str) -> List[Dict[str, Any]]:
+        """Get all face embeddings for a specific photo."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT fe.id, fe.asset_id, fe.face_index, fe.embedding,
+                          fe.bbox_x, fe.bbox_y, fe.bbox_w, fe.bbox_h,
+                          fe.identity_id, fe.confidence,
+                          fi.label as identity_label
+                   FROM face_embeddings fe
+                   LEFT JOIN face_identities fi ON fe.identity_id = fi.id
+                   WHERE fe.asset_id = ?
+                   ORDER BY fe.face_index""",
+                (asset_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def create_face_identity(
+        self,
+        user_id: str,
+        label: Optional[str] = None,
+        representative_embedding: Optional[bytes] = None,
+    ) -> int:
+        """Create a new face identity cluster. Returns identity id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO face_identities
+                       (user_id, label, representative_embedding)
+                   VALUES (?, ?, ?)""",
+                (user_id, label, representative_embedding),
+            )
+            return cursor.lastrowid
+
+    def update_face_identity_label(self, identity_id: int, user_id: str, label: str) -> bool:
+        """Let user name a face cluster. Only updates own identities."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE face_identities
+                   SET label = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND user_id = ?""",
+                (label, identity_id, user_id),
+            )
+            return cursor.rowcount > 0
+
+    def assign_face_to_identity(self, face_embedding_id: int, identity_id: int):
+        """Assign a detected face embedding to an identity cluster."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "UPDATE face_embeddings SET identity_id = ? WHERE id = ?",
+                (identity_id, face_embedding_id),
+            )
+
+    def update_face_identity_photo_count(self, identity_id: int, count: int):
+        """Update the photo count for an identity cluster."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                """UPDATE face_identities
+                   SET photo_count = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (count, identity_id),
+            )
+
+    def get_face_identities(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get all face identity clusters for a user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT id, user_id, label, photo_count, created_at, updated_at
+                   FROM face_identities
+                   WHERE user_id = ?
+                   ORDER BY photo_count DESC""",
+                (user_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_face_identity(self, identity_id: int, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single face identity (user-scoped)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM face_identities WHERE id = ? AND user_id = ?",
+                (identity_id, user_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_photos_by_identity(
+        self, identity_id: int, user_id: str
+    ) -> List[Dict[str, Any]]:
+        """Get all photos (asset_ids) that contain a specific person."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT DISTINCT fe.asset_id, fe.bbox_x, fe.bbox_y,
+                          fe.bbox_w, fe.bbox_h, fe.confidence,
+                          ps.score, ps.year, ps.month
+                   FROM face_embeddings fe
+                   LEFT JOIN photo_scores ps ON fe.asset_id = ps.asset_id
+                   WHERE fe.identity_id = ? AND fe.user_id = ?
+                   ORDER BY ps.score DESC""",
+                (identity_id, user_id),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def merge_face_identities(
+        self, user_id: str, source_id: int, target_id: int
+    ) -> bool:
+        """Merge source identity cluster into target. User must own both."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Verify ownership of both
+            cursor.execute(
+                "SELECT id FROM face_identities WHERE id IN (?, ?) AND user_id = ?",
+                (source_id, target_id, user_id),
+            )
+            if len(cursor.fetchall()) != 2:
+                return False
+            # Re-assign all embeddings from source to target
+            cursor.execute(
+                "UPDATE face_embeddings SET identity_id = ? WHERE identity_id = ? AND user_id = ?",
+                (target_id, source_id, user_id),
+            )
+            # Recalculate photo count for target
+            cursor.execute(
+                """UPDATE face_identities
+                   SET photo_count = (
+                       SELECT COUNT(DISTINCT asset_id) FROM face_embeddings
+                       WHERE identity_id = ?
+                   ), updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (target_id, target_id),
+            )
+            # Delete empty source
+            cursor.execute(
+                "DELETE FROM face_identities WHERE id = ? AND user_id = ?",
+                (source_id, user_id),
+            )
+            return True
+
+    # ------------------------------------------------------------------
+    # Scene Detection
+    # ------------------------------------------------------------------
+
+    def save_scene_classification(
+        self,
+        asset_id: str,
+        user_id: str,
+        scene_category: str,
+        scene_subcategory: Optional[str],
+        confidence: Optional[float],
+        top3_json: str,
+    ):
+        """Save or replace scene classification for a photo."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                """INSERT OR REPLACE INTO scene_classifications
+                       (asset_id, user_id, scene_category, scene_subcategory,
+                        confidence, top3_scenes)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (asset_id, user_id, scene_category, scene_subcategory,
+                 confidence, top3_json),
+            )
+
+    def get_scene_classification(self, asset_id: str) -> Optional[Dict[str, Any]]:
+        """Get scene classification for a single photo."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM scene_classifications WHERE asset_id = ?",
+                (asset_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                result = dict(row)
+                if result.get("top3_scenes"):
+                    result["top3_scenes"] = json.loads(result["top3_scenes"])
+                return result
+            return None
+
+    def get_photos_by_scene(
+        self,
+        user_id: str,
+        scene_category: str,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get photos filtered by scene super-category."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT sc.asset_id, sc.scene_category, sc.scene_subcategory,
+                       sc.confidence, ps.score, ps.year, ps.month
+                FROM scene_classifications sc
+                LEFT JOIN photo_scores ps ON sc.asset_id = ps.asset_id
+                WHERE sc.user_id = ? AND sc.scene_category = ?
+            """
+            params: list = [user_id, scene_category]
+            if year is not None:
+                query += " AND ps.year = ?"
+                params.append(year)
+            if month is not None:
+                query += " AND ps.month = ?"
+                params.append(month)
+            query += " ORDER BY ps.score DESC"
+            cursor.execute(query, params)
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_scene_distribution(
+        self, user_id: str, year: Optional[int] = None
+    ) -> Dict[str, int]:
+        """Return count of photos per scene super-category for a user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT sc.scene_category, COUNT(*) as count
+                FROM scene_classifications sc
+                LEFT JOIN photo_scores ps ON sc.asset_id = ps.asset_id
+                WHERE sc.user_id = ?
+            """
+            params: list = [user_id]
+            if year is not None:
+                query += " AND ps.year = ?"
+                params.append(year)
+            query += " GROUP BY sc.scene_category ORDER BY count DESC"
+            cursor.execute(query, params)
+            return {r["scene_category"]: r["count"] for r in cursor.fetchall()}
 
     def log_share_access(self, share_id: int, ip_address: str, user_agent: str):
         """Record an access to a share link for auditing."""

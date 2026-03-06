@@ -562,8 +562,35 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
                 scores = analyzer.analyze_photo(cached_path)
 
                 if scores.get('success'):
-                    # Save to database
+                    # Save core quality scores
                     database.save_photo_score(asset_id, user_id, year, month, scores)
+
+                    # Save face embeddings (face recognition)
+                    for fi, face_data in enumerate(scores.get('face_embeddings', [])):
+                        from .face_recognition_engine import FaceRecognitionEngine  # noqa: PLC0415
+                        database.save_face_embedding(
+                            asset_id=asset_id,
+                            user_id=user_id,
+                            face_index=fi,
+                            embedding_bytes=FaceRecognitionEngine.embedding_to_bytes(
+                                face_data['embedding']
+                            ),
+                            bbox=face_data['bbox'],
+                            confidence=face_data.get('confidence'),
+                        )
+
+                    # Save scene classification
+                    scene = scores.get('scene')
+                    if scene:
+                        import json as _json  # noqa: PLC0415
+                        database.save_scene_classification(
+                            asset_id=asset_id,
+                            user_id=user_id,
+                            scene_category=scene['scene_category'],
+                            scene_subcategory=scene.get('scene_subcategory'),
+                            confidence=scene.get('confidence'),
+                            top3_json=_json.dumps(scene.get('top3_scenes', [])),
+                        )
 
                     if (i + 1) % 10 == 0:
                         logger.info(f"Analyzed {i + 1}/{len(photos)} photos")
@@ -594,6 +621,9 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
 
         logger.info(f"Analysis complete! Suggested {len(ai_suggested)} photos")
         logger.info(f"Found {len(duplicates)} duplicate groups")
+
+        # Cluster face embeddings into identity groups
+        _cluster_face_identities(user_id)
 
     except Exception as e:
         logger.error(f"Error in background analysis: {e}")
@@ -1455,6 +1485,256 @@ async def change_user_role(
     if not success:
         raise HTTPException(status_code=400, detail="Cannot remove the last admin")
     return {"status": "updated"}
+
+
+def _cluster_face_identities(user_id: str):
+    """
+    Re-cluster all face embeddings for *user_id* into identity groups.
+
+    Runs synchronously inside the background analysis task.  For typical
+    family libraries (<10 000 faces) this completes in well under a second.
+    """
+    if not database:
+        return
+    try:
+        from .face_recognition_engine import FaceRecognitionEngine  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
+
+        rows = database.get_face_embeddings_for_user(user_id)
+        if not rows:
+            return
+
+        db_ids = [r["id"] for r in rows]
+        embeddings = [
+            FaceRecognitionEngine.bytes_to_embedding(r["embedding"])
+            for r in rows
+        ]
+
+        threshold = (
+            config.get("ai", {}).get("face_clustering_threshold", 0.6)
+            if config else 0.6
+        )
+        assignment = FaceRecognitionEngine.cluster_embeddings(
+            embeddings, embedding_ids=db_ids, threshold=threshold
+        )
+
+        # Map cluster_id → existing or newly created identity_id
+        cluster_to_identity: Dict[int, int] = {}
+        for db_id, cluster_id in assignment.items():
+            if cluster_id not in cluster_to_identity:
+                identity_id = database.create_face_identity(user_id)
+                cluster_to_identity[cluster_id] = identity_id
+            database.assign_face_to_identity(db_id, cluster_to_identity[cluster_id])
+
+        # Update photo counts per identity
+        for identity_id in cluster_to_identity.values():
+            photos = database.get_photos_by_identity(identity_id, user_id)
+            database.update_face_identity_photo_count(identity_id, len(photos))
+
+        logger.info(
+            f"Face clustering: {len(embeddings)} embeddings → "
+            f"{len(cluster_to_identity)} identities for user {user_id}"
+        )
+    except ImportError:
+        logger.debug("face_recognition not installed, skipping clustering")
+    except Exception as e:
+        logger.error(f"Face clustering error for user {user_id}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Request/response models for face recognition and scene detection endpoints
+# ---------------------------------------------------------------------------
+
+class IdentityLabelRequest(BaseModel):
+    label: str
+
+
+class MergeIdentitiesRequest(BaseModel):
+    source_identity_id: int
+    target_identity_id: int
+
+
+# ---------------------------------------------------------------------------
+# Face Recognition endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/faces/identities")
+@limiter.limit("30/minute")
+async def get_face_identities(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """List all detected people (identity clusters) for the authenticated user."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    identities = database.get_face_identities(user["id"])
+    # Strip binary embedding blobs before returning JSON
+    for ident in identities:
+        ident.pop("representative_embedding", None)
+    return {"identities": identities}
+
+
+@app.get("/api/faces/identities/{identity_id}/photos")
+@limiter.limit("30/minute")
+async def get_identity_photos(
+    request: Request,
+    identity_id: int,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Get all photos containing a specific detected person."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    user_id = user["id"]
+    identity = database.get_face_identity(identity_id, user_id)
+    if not identity:
+        raise HTTPException(status_code=404, detail="Identity not found")
+    photos = database.get_photos_by_identity(identity_id, user_id)
+
+    # Enrich with thumbnail URLs
+    user_client = ImmichClient(app.state.immich_api_url, user["access_token"])
+    for photo in photos:
+        photo["thumbnail_url"] = user_client.get_thumbnail_url(photo["asset_id"])
+
+    return {
+        "identity_id": identity_id,
+        "label": identity.get("label"),
+        "photo_count": identity.get("photo_count", 0),
+        "photos": photos,
+    }
+
+
+@app.put("/api/faces/identities/{identity_id}")
+@limiter.limit("30/minute")
+async def label_face_identity(
+    request: Request,
+    identity_id: int,
+    body: IdentityLabelRequest,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Name a detected face cluster (e.g. 'Mom', 'Alice')."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    updated = database.update_face_identity_label(identity_id, user["id"], body.label)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Identity not found")
+    return {"status": "updated", "identity_id": identity_id, "label": body.label}
+
+
+@app.post("/api/faces/identities/merge")
+@limiter.limit("10/minute")
+async def merge_face_identities(
+    request: Request,
+    body: MergeIdentitiesRequest,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Merge two identity clusters that represent the same person."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    success = database.merge_face_identities(
+        user["id"], body.source_identity_id, body.target_identity_id
+    )
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail="One or both identities not found or not owned by you",
+        )
+    return {
+        "status": "merged",
+        "target_identity_id": body.target_identity_id,
+    }
+
+
+@app.get("/api/faces/photo/{asset_id}")
+@limiter.limit("30/minute")
+async def get_photo_faces(
+    request: Request,
+    asset_id: str,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Get all detected faces (with identity labels) for a specific photo."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    faces = database.get_face_embeddings_for_asset(asset_id)
+    # Never expose raw embedding bytes in the API
+    for face in faces:
+        face.pop("embedding", None)
+    return {"asset_id": asset_id, "faces": faces}
+
+
+# ---------------------------------------------------------------------------
+# Scene Detection endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/scenes/categories")
+@limiter.limit("30/minute")
+async def get_scene_categories(
+    request: Request,
+    year: Optional[int] = None,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Get available scene categories with photo counts for the authenticated user."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    distribution = database.get_scene_distribution(user["id"], year=year)
+    categories = [
+        {"category": cat, "count": count}
+        for cat, count in distribution.items()
+    ]
+    return {"categories": categories, "year": year}
+
+
+@app.get("/api/scenes/{category}/photos")
+@limiter.limit("30/minute")
+async def get_scene_photos(
+    request: Request,
+    category: str,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Get photos classified under a given scene super-category."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    photos = database.get_photos_by_scene(
+        user["id"], category, year=year, month=month
+    )
+    user_client = ImmichClient(app.state.immich_api_url, user["access_token"])
+    for photo in photos:
+        photo["thumbnail_url"] = user_client.get_thumbnail_url(photo["asset_id"])
+    return {
+        "category": category,
+        "year": year,
+        "month": month,
+        "total": len(photos),
+        "photos": photos,
+    }
+
+
+@app.get("/api/scenes/distribution")
+@limiter.limit("30/minute")
+async def get_scene_distribution(
+    request: Request,
+    year: Optional[int] = None,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    """Get scene distribution chart data for the authenticated user."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    distribution = database.get_scene_distribution(user["id"], year=year)
+    return {
+        "year": year,
+        "distribution": distribution,
+        "labels": list(distribution.keys()),
+        "values": list(distribution.values()),
+    }
 
 
 def main():
