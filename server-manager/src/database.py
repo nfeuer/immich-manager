@@ -16,6 +16,43 @@ logger = logging.getLogger(__name__)
 MIGRATIONS: List[tuple] = [
     # Version 1: initial schema (already created by _init_db for fresh installs)
     (1, "initial schema", []),
+    # Version 2: users table for RBAC
+    (2, "add users table for RBAC", [
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            immich_user_id TEXT NOT NULL UNIQUE,
+            email TEXT,
+            name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_users_immich_id ON users(immich_user_id)",
+    ]),
+    # Version 3: auto-updater tables (snapshots + update_history)
+    (3, "add auto-updater snapshot and update_history tables", [
+        """CREATE TABLE IF NOT EXISTS snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            trigger TEXT NOT NULL,
+            version_before TEXT NOT NULL,
+            db_backup_path TEXT,
+            compose_backup_path TEXT,
+            status TEXT NOT NULL DEFAULT 'available'
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON snapshots(created_at)",
+        """CREATE TABLE IF NOT EXISTS update_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME,
+            from_version TEXT,
+            to_version TEXT,
+            snapshot_id INTEGER REFERENCES snapshots(id),
+            status TEXT NOT NULL,
+            error_message TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_update_history_started_at ON update_history(started_at)",
+    ]),
 ]
 
 
@@ -339,3 +376,91 @@ class Database:
             """, (days,))
 
             # Keep all backups and alerts history
+
+    # ------------------------------------------------------------------ #
+    # Snapshot helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def record_snapshot(
+        self,
+        trigger: str,
+        version_before: str,
+        db_backup_path: Optional[str] = None,
+        compose_backup_path: Optional[str] = None,
+    ) -> int:
+        """Insert a snapshot record and return its id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO snapshots
+                   (trigger, version_before, db_backup_path, compose_backup_path, status)
+                   VALUES (?, ?, ?, ?, 'available')""",
+                (trigger, version_before, db_backup_path, compose_backup_path),
+            )
+            return cursor.lastrowid
+
+    def get_snapshots(self, limit: int = 20) -> List[Dict]:
+        """Return the most recent snapshots."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM snapshots ORDER BY created_at DESC LIMIT ?", (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_snapshot_status(self, snapshot_id: int, status: str) -> None:
+        """Update the status field of a snapshot."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE snapshots SET status = ? WHERE id = ?", (status, snapshot_id)
+            )
+
+    # ------------------------------------------------------------------ #
+    # Update-history helpers                                               #
+    # ------------------------------------------------------------------ #
+
+    def record_update_history(
+        self,
+        from_version: str,
+        to_version: str,
+        status: str = "in_progress",
+    ) -> int:
+        """Insert an in-progress update record and return its id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO update_history (from_version, to_version, status)
+                   VALUES (?, ?, ?)""",
+                (from_version, to_version, status),
+            )
+            return cursor.lastrowid
+
+    def complete_update_history(
+        self,
+        history_id: int,
+        status: str,
+        error_message: Optional[str] = None,
+        snapshot_id: Optional[int] = None,
+    ) -> None:
+        """Mark an update record as complete with final status and metadata."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE update_history
+                   SET completed_at = CURRENT_TIMESTAMP,
+                       status = ?,
+                       error_message = ?,
+                       snapshot_id = COALESCE(?, snapshot_id)
+                   WHERE id = ?""",
+                (status, error_message, snapshot_id, history_id),
+            )
+
+    def get_update_history(self, limit: int = 20) -> List[Dict]:
+        """Return the most recent update history records."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM update_history ORDER BY started_at DESC LIMIT ?", (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]

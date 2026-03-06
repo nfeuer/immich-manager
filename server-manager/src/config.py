@@ -104,6 +104,20 @@ class AlertsConfig(BaseModel):
     quiet_hours: QuietHoursConfig = Field(default_factory=QuietHoursConfig)
 
 
+class AuthConfig(BaseModel):
+    """Authentication and RBAC configuration"""
+    default_role: str = "user"  # Role for new users: "admin", "user", or "guest"
+
+
+class AutoUpdateConfig(BaseModel):
+    """Auto-updater configuration"""
+    enabled: bool = False
+    apply_patch_updates: bool = False   # Auto-apply x.y.Z → x.y.Z+1 patches
+    docker_compose_path: str = "/opt/immich"
+    snapshot_retention_days: int = 7
+    health_check_timeout: int = 120     # Seconds to wait for healthy post-update
+
+
 class Config(BaseModel):
     """Main configuration"""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -113,6 +127,8 @@ class Config(BaseModel):
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     thresholds: ThresholdsConfig = Field(default_factory=ThresholdsConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+    auto_update: AutoUpdateConfig = Field(default_factory=AutoUpdateConfig)
 
 
 _ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')

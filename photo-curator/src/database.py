@@ -39,6 +39,101 @@ MIGRATIONS: List[tuple] = [
             UNIQUE(owner_id, year, month, contributor_id, asset_id)
         )""",
     ]),
+    # Version 3: users table for RBAC + album sharing with token-based guest links
+    (3, "add users and album sharing tables", [
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            immich_user_id TEXT NOT NULL UNIQUE,
+            email TEXT,
+            name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_users_immich_id ON users(immich_user_id)",
+        """CREATE TABLE IF NOT EXISTS album_shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            share_token TEXT NOT NULL UNIQUE,
+            shared_with_user_id TEXT,
+            guest_label TEXT,
+            can_add_photos BOOLEAN DEFAULT 0,
+            expires_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            revoked BOOLEAN DEFAULT 0
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_album_shares_token ON album_shares(share_token)",
+        "CREATE INDEX IF NOT EXISTS idx_album_shares_album ON album_shares(album_id)",
+        "CREATE INDEX IF NOT EXISTS idx_album_shares_user ON album_shares(shared_with_user_id)",
+        """CREATE TABLE IF NOT EXISTS album_contributions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            share_id INTEGER NOT NULL,
+            contributor_name TEXT NOT NULL,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(album_id, asset_id),
+            FOREIGN KEY (share_id) REFERENCES album_shares(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_contributions_album ON album_contributions(album_id)",
+        "CREATE INDEX IF NOT EXISTS idx_contributions_share ON album_contributions(share_id)",
+        """CREATE TABLE IF NOT EXISTS share_access_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            share_id INTEGER NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (share_id) REFERENCES album_shares(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_access_log_share ON share_access_log(share_id)",
+    ]),
+    # Version 4: face recognition and scene detection tables
+    (4, "add face recognition and scene detection tables", [
+        # face_identities must be created before face_embeddings (FK reference)
+        """CREATE TABLE IF NOT EXISTS face_identities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            label TEXT,
+            representative_embedding BLOB,
+            photo_count INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_face_ident_user ON face_identities(user_id)",
+        """CREATE TABLE IF NOT EXISTS face_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            face_index INTEGER NOT NULL DEFAULT 0,
+            embedding BLOB NOT NULL,
+            bbox_x INTEGER,
+            bbox_y INTEGER,
+            bbox_w INTEGER,
+            bbox_h INTEGER,
+            identity_id INTEGER,
+            confidence REAL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(asset_id, face_index),
+            FOREIGN KEY (identity_id) REFERENCES face_identities(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_face_emb_asset ON face_embeddings(asset_id)",
+        "CREATE INDEX IF NOT EXISTS idx_face_emb_user ON face_embeddings(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_face_emb_identity ON face_embeddings(identity_id)",
+        """CREATE TABLE IF NOT EXISTS scene_classifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id TEXT NOT NULL UNIQUE,
+            user_id TEXT NOT NULL,
+            scene_category TEXT NOT NULL,
+            scene_subcategory TEXT,
+            confidence REAL,
+            top3_scenes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_scene_asset ON scene_classifications(asset_id)",
+        "CREATE INDEX IF NOT EXISTS idx_scene_user ON scene_classifications(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_scene_category ON scene_classifications(scene_category)",
+    ]),
 ]
 
 
@@ -744,4 +839,463 @@ class Database:
                 WHERE owner_id = ? AND year = ? AND month = ?
                 ORDER BY added_at
             """, (owner_id, year, month))
+            return [dict(r) for r in cursor.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Album sharing (token-based guest links + user shares)
+    # ------------------------------------------------------------------
+
+    def create_share(
+        self,
+        album_id: str,
+        owner_id: str,
+        shared_with_user_id: Optional[str] = None,
+        guest_label: Optional[str] = None,
+        can_add_photos: bool = False,
+        expires_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a share link for an album.
+
+        For user shares, *shared_with_user_id* is set and *expires_at*
+        is forced to NULL.  For guest links, a token-based URL is
+        generated.
+        """
+        import secrets
+        token = secrets.token_urlsafe(32)
+
+        # User shares never expire
+        if shared_with_user_id:
+            expires_at = None
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO album_shares
+                    (album_id, owner_id, share_token, shared_with_user_id,
+                     guest_label, can_add_photos, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (album_id, owner_id, token, shared_with_user_id,
+                  guest_label, can_add_photos, expires_at))
+            return {
+                "id": cursor.lastrowid,
+                "album_id": album_id,
+                "owner_id": owner_id,
+                "share_token": token,
+                "shared_with_user_id": shared_with_user_id,
+                "guest_label": guest_label,
+                "can_add_photos": can_add_photos,
+                "expires_at": expires_at,
+                "revoked": False,
+            }
+
+    def get_share_by_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Look up a share by token.  Returns None if revoked or expired."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM album_shares
+                WHERE share_token = ?
+                  AND revoked = 0
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            """, (token,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def revoke_share(self, share_id: int, owner_id: str) -> bool:
+        """Revoke a share (soft-delete).  Only the owner can revoke."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE album_shares SET revoked = 1 WHERE id = ? AND owner_id = ?",
+                (share_id, owner_id),
+            )
+            return cursor.rowcount > 0
+
+    def get_album_shares(self, album_id: str) -> List[Dict[str, Any]]:
+        """Get all shares for an album (including revoked, for admin view)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM album_shares WHERE album_id = ? ORDER BY created_at",
+                (album_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_shared_albums_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get active (non-expired, non-revoked) shares for an Immich user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM album_shares
+                WHERE shared_with_user_id = ?
+                  AND revoked = 0
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                ORDER BY created_at DESC
+            """, (user_id,))
+            return [dict(r) for r in cursor.fetchall()]
+
+    def update_share(
+        self,
+        share_id: int,
+        owner_id: str,
+        can_add_photos: Optional[bool] = None,
+        expires_at: Optional[str] = None,
+    ) -> bool:
+        """Update share settings.  Only the owner can update."""
+        updates = []
+        params: list = []
+        if can_add_photos is not None:
+            updates.append("can_add_photos = ?")
+            params.append(can_add_photos)
+        if expires_at is not None:
+            updates.append("expires_at = ?")
+            params.append(expires_at)
+        if not updates:
+            return False
+        params.extend([share_id, owner_id])
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE album_shares SET {', '.join(updates)} "
+                "WHERE id = ? AND owner_id = ?",
+                params,
+            )
+            return cursor.rowcount > 0
+
+    def add_contribution(
+        self, album_id: str, asset_id: str, share_id: int, contributor_name: str
+    ):
+        """Record a photo contribution to a shared album."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("""
+                INSERT OR IGNORE INTO album_contributions
+                    (album_id, asset_id, share_id, contributor_name)
+                VALUES (?, ?, ?, ?)
+            """, (album_id, asset_id, share_id, contributor_name))
+
+    def get_contributions(self, album_id: str) -> List[Dict[str, Any]]:
+        """Get all contributions for an album with contributor info."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT c.id, c.album_id, c.asset_id, c.share_id,
+                       c.contributor_name, c.added_at,
+                       s.guest_label, s.shared_with_user_id
+                FROM album_contributions c
+                JOIN album_shares s ON c.share_id = s.id
+                WHERE c.album_id = ?
+                ORDER BY c.added_at
+            """, (album_id,))
+            return [dict(r) for r in cursor.fetchall()]
+
+    def delete_contribution(self, album_id: str, asset_id: str, share_id: int) -> bool:
+        """Delete a contribution.  Only the contributor (by share_id) can delete."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM album_contributions "
+                "WHERE album_id = ? AND asset_id = ? AND share_id = ?",
+                (album_id, asset_id, share_id),
+            )
+            return cursor.rowcount > 0
+
+    def delete_contribution_as_owner(self, contribution_id: int, album_id: str) -> bool:
+        """Delete any contribution (for album owner / admin)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM album_contributions WHERE id = ? AND album_id = ?",
+                (contribution_id, album_id),
+            )
+            return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Face Recognition
+    # ------------------------------------------------------------------
+
+    def save_face_embedding(
+        self,
+        asset_id: str,
+        user_id: str,
+        face_index: int,
+        embedding_bytes: bytes,
+        bbox: tuple,
+        identity_id: Optional[int] = None,
+        confidence: Optional[float] = None,
+    ) -> int:
+        """Save or replace a face embedding for one detected face. Returns row id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            x, y, w, h = bbox
+            cursor.execute(
+                """INSERT OR REPLACE INTO face_embeddings
+                       (asset_id, user_id, face_index, embedding,
+                        bbox_x, bbox_y, bbox_w, bbox_h,
+                        identity_id, confidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (asset_id, user_id, face_index, embedding_bytes,
+                 x, y, w, h, identity_id, confidence),
+            )
+            return cursor.lastrowid
+
+    def get_face_embeddings_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get all face embeddings for a user (used for clustering)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT id, asset_id, face_index, embedding,
+                          bbox_x, bbox_y, bbox_w, bbox_h,
+                          identity_id, confidence
+                   FROM face_embeddings WHERE user_id = ?""",
+                (user_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_face_embeddings_for_asset(self, asset_id: str) -> List[Dict[str, Any]]:
+        """Get all face embeddings for a specific photo."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT fe.id, fe.asset_id, fe.face_index, fe.embedding,
+                          fe.bbox_x, fe.bbox_y, fe.bbox_w, fe.bbox_h,
+                          fe.identity_id, fe.confidence,
+                          fi.label as identity_label
+                   FROM face_embeddings fe
+                   LEFT JOIN face_identities fi ON fe.identity_id = fi.id
+                   WHERE fe.asset_id = ?
+                   ORDER BY fe.face_index""",
+                (asset_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def create_face_identity(
+        self,
+        user_id: str,
+        label: Optional[str] = None,
+        representative_embedding: Optional[bytes] = None,
+    ) -> int:
+        """Create a new face identity cluster. Returns identity id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO face_identities
+                       (user_id, label, representative_embedding)
+                   VALUES (?, ?, ?)""",
+                (user_id, label, representative_embedding),
+            )
+            return cursor.lastrowid
+
+    def update_face_identity_label(self, identity_id: int, user_id: str, label: str) -> bool:
+        """Let user name a face cluster. Only updates own identities."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE face_identities
+                   SET label = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND user_id = ?""",
+                (label, identity_id, user_id),
+            )
+            return cursor.rowcount > 0
+
+    def assign_face_to_identity(self, face_embedding_id: int, identity_id: int):
+        """Assign a detected face embedding to an identity cluster."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "UPDATE face_embeddings SET identity_id = ? WHERE id = ?",
+                (identity_id, face_embedding_id),
+            )
+
+    def update_face_identity_photo_count(self, identity_id: int, count: int):
+        """Update the photo count for an identity cluster."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                """UPDATE face_identities
+                   SET photo_count = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (count, identity_id),
+            )
+
+    def get_face_identities(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get all face identity clusters for a user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT id, user_id, label, photo_count, created_at, updated_at
+                   FROM face_identities
+                   WHERE user_id = ?
+                   ORDER BY photo_count DESC""",
+                (user_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_face_identity(self, identity_id: int, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single face identity (user-scoped)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM face_identities WHERE id = ? AND user_id = ?",
+                (identity_id, user_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_photos_by_identity(
+        self, identity_id: int, user_id: str
+    ) -> List[Dict[str, Any]]:
+        """Get all photos (asset_ids) that contain a specific person."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT DISTINCT fe.asset_id, fe.bbox_x, fe.bbox_y,
+                          fe.bbox_w, fe.bbox_h, fe.confidence,
+                          ps.score, ps.year, ps.month
+                   FROM face_embeddings fe
+                   LEFT JOIN photo_scores ps ON fe.asset_id = ps.asset_id
+                   WHERE fe.identity_id = ? AND fe.user_id = ?
+                   ORDER BY ps.score DESC""",
+                (identity_id, user_id),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def merge_face_identities(
+        self, user_id: str, source_id: int, target_id: int
+    ) -> bool:
+        """Merge source identity cluster into target. User must own both."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Verify ownership of both
+            cursor.execute(
+                "SELECT id FROM face_identities WHERE id IN (?, ?) AND user_id = ?",
+                (source_id, target_id, user_id),
+            )
+            if len(cursor.fetchall()) != 2:
+                return False
+            # Re-assign all embeddings from source to target
+            cursor.execute(
+                "UPDATE face_embeddings SET identity_id = ? WHERE identity_id = ? AND user_id = ?",
+                (target_id, source_id, user_id),
+            )
+            # Recalculate photo count for target
+            cursor.execute(
+                """UPDATE face_identities
+                   SET photo_count = (
+                       SELECT COUNT(DISTINCT asset_id) FROM face_embeddings
+                       WHERE identity_id = ?
+                   ), updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (target_id, target_id),
+            )
+            # Delete empty source
+            cursor.execute(
+                "DELETE FROM face_identities WHERE id = ? AND user_id = ?",
+                (source_id, user_id),
+            )
+            return True
+
+    # ------------------------------------------------------------------
+    # Scene Detection
+    # ------------------------------------------------------------------
+
+    def save_scene_classification(
+        self,
+        asset_id: str,
+        user_id: str,
+        scene_category: str,
+        scene_subcategory: Optional[str],
+        confidence: Optional[float],
+        top3_json: str,
+    ):
+        """Save or replace scene classification for a photo."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                """INSERT OR REPLACE INTO scene_classifications
+                       (asset_id, user_id, scene_category, scene_subcategory,
+                        confidence, top3_scenes)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (asset_id, user_id, scene_category, scene_subcategory,
+                 confidence, top3_json),
+            )
+
+    def get_scene_classification(self, asset_id: str) -> Optional[Dict[str, Any]]:
+        """Get scene classification for a single photo."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM scene_classifications WHERE asset_id = ?",
+                (asset_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                result = dict(row)
+                if result.get("top3_scenes"):
+                    result["top3_scenes"] = json.loads(result["top3_scenes"])
+                return result
+            return None
+
+    def get_photos_by_scene(
+        self,
+        user_id: str,
+        scene_category: str,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get photos filtered by scene super-category."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT sc.asset_id, sc.scene_category, sc.scene_subcategory,
+                       sc.confidence, ps.score, ps.year, ps.month
+                FROM scene_classifications sc
+                LEFT JOIN photo_scores ps ON sc.asset_id = ps.asset_id
+                WHERE sc.user_id = ? AND sc.scene_category = ?
+            """
+            params: list = [user_id, scene_category]
+            if year is not None:
+                query += " AND ps.year = ?"
+                params.append(year)
+            if month is not None:
+                query += " AND ps.month = ?"
+                params.append(month)
+            query += " ORDER BY ps.score DESC"
+            cursor.execute(query, params)
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_scene_distribution(
+        self, user_id: str, year: Optional[int] = None
+    ) -> Dict[str, int]:
+        """Return count of photos per scene super-category for a user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT sc.scene_category, COUNT(*) as count
+                FROM scene_classifications sc
+                LEFT JOIN photo_scores ps ON sc.asset_id = ps.asset_id
+                WHERE sc.user_id = ?
+            """
+            params: list = [user_id]
+            if year is not None:
+                query += " AND ps.year = ?"
+                params.append(year)
+            query += " GROUP BY sc.scene_category ORDER BY count DESC"
+            cursor.execute(query, params)
+            return {r["scene_category"]: r["count"] for r in cursor.fetchall()}
+
+    def log_share_access(self, share_id: int, ip_address: str, user_agent: str):
+        """Record an access to a share link for auditing."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "INSERT INTO share_access_log (share_id, ip_address, user_agent) "
+                "VALUES (?, ?, ?)",
+                (share_id, ip_address, user_agent),
+            )
+
+    def get_share_access_log(self, share_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get access log for a share."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM share_access_log WHERE share_id = ? "
+                "ORDER BY accessed_at DESC LIMIT ?",
+                (share_id, limit),
+            )
             return [dict(r) for r in cursor.fetchall()]

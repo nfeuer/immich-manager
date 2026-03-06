@@ -46,6 +46,41 @@ class PhotoAnalyzer:
         except Exception as e:
             logger.warning(f"Could not load face detection cascades: {e}")
 
+        # Advanced AI engines (lazy-loaded on first use)
+        self._face_engine = None
+        self._scene_detector = None
+
+    def _get_face_engine(self):
+        """Return FaceRecognitionEngine, loading lazily. Returns None if unavailable."""
+        if self._face_engine is not None:
+            return self._face_engine
+        if not self.config.get('ai', {}).get('face_recognition', True):
+            return None
+        try:
+            from .face_recognition_engine import FaceRecognitionEngine  # noqa: PLC0415
+            self._face_engine = FaceRecognitionEngine()
+            logger.info("Face recognition engine initialised")
+        except Exception as e:
+            logger.warning(f"Face recognition unavailable: {e}")
+            self._face_engine = False  # sentinel — don't retry
+        return self._face_engine if self._face_engine else None
+
+    def _get_scene_detector(self):
+        """Return SceneDetector, loading lazily. Returns None if unavailable."""
+        if self._scene_detector is not None:
+            return self._scene_detector
+        if not self.config.get('ai', {}).get('scene_detection', True):
+            return None
+        try:
+            from .scene_detector import SceneDetector  # noqa: PLC0415
+            model_dir = self.config.get('ai', {}).get('model_dir', 'data/models')
+            self._scene_detector = SceneDetector(model_dir=model_dir)
+            logger.info("Scene detector initialised")
+        except Exception as e:
+            logger.warning(f"Scene detection unavailable: {e}")
+            self._scene_detector = False  # sentinel — don't retry
+        return self._scene_detector if self._scene_detector else None
+
     def analyze_photo(self, image_path: str) -> Dict[str, Any]:
         """
         Complete photo analysis
@@ -96,6 +131,24 @@ class PhotoAnalyzer:
                 weights['aesthetic'] * aesthetic_score
             )
 
+            # --- Advanced AI: face recognition embeddings ---
+            face_embeddings: List[Dict] = []
+            face_engine = self._get_face_engine()
+            if face_engine:
+                try:
+                    face_embeddings = face_engine.detect_and_encode(image_path)
+                except Exception as e:
+                    logger.warning(f"Face recognition failed for {image_path}: {e}")
+
+            # --- Advanced AI: scene detection ---
+            scene_result: Optional[Dict] = None
+            scene_detector = self._get_scene_detector()
+            if scene_detector:
+                try:
+                    scene_result = scene_detector.classify(image_path)
+                except Exception as e:
+                    logger.warning(f"Scene detection failed for {image_path}: {e}")
+
             return {
                 'score': round(final_score, 3),
                 'technical_quality': round(technical_score, 3),
@@ -104,6 +157,8 @@ class PhotoAnalyzer:
                 'composition_score': round(composition_score, 3),
                 'face_score': round(face_score, 3),
                 'face_count': face_count,
+                'face_embeddings': face_embeddings,
+                'scene': scene_result,
                 'perceptual_hash': img_hash,
                 'width': width,
                 'height': height,

@@ -80,6 +80,15 @@ backup_verification:
     weekly: 4     # Keep 4 weekly backups (one per week)
     monthly: 12   # Keep 12 monthly backups (one per month)
 
+auto_update:
+  enabled: false              # Set to true to enable the auto-updater
+  apply_patch_updates: false  # Auto-apply patch bumps (e.g. 1.99.0 → 1.99.1)
+                              # Minor (1.Y.z) and major (X.y.z) bumps always require
+                              # manual approval via POST /api/updates/apply
+  docker_compose_path: "/opt/immich"   # Directory containing docker-compose.yml
+  snapshot_retention_days: 7           # Days to keep pre-update snapshots
+  health_check_timeout: 120            # Seconds to wait for Immich to come back healthy
+
 monitoring:
   disk_check_interval: 300  # 5 minutes
   metrics_interval: 60      # 1 minute
@@ -89,6 +98,9 @@ thresholds:
   disk_temp_critical: 50
   disk_space_warning: 85
   disk_space_critical: 95
+
+auth:
+  default_role: "user"  # Role assigned to new users: "admin", "user", or "guest"
 
 alerts:
   email:
@@ -104,8 +116,8 @@ alerts:
     enabled: false
     url: ""
   discord:
-    enabled: false
-    webhook_url: "${DISCORD_WEBHOOK_URL:-}"  # Discord channel webhook URL
+    enabled: true
+    webhook_url: "https://discord.com/api/webhooks/1477171884113137776/c5V2BXJ0lmaHEwihAsIwqDee-xOhKH9tQvWsqMHr6ejid5RG2cEXB7rtnJ2T1JRxNipr"
     bot_name: "House of Feuer"              # Display name in Discord
     server_name: ""                          # Optional: label for this server
   quiet_hours:
