@@ -1,0 +1,186 @@
+# =============================================================================
+# immich.yml — Immich photo management stack
+# =============================================================================
+# Always include core.yml so the shared "homelab" network exists first:
+#
+#   docker compose --env-file docker/.env \
+#     -f docker/core.yml -f docker/immich.yml up -d
+#
+# ALL configurable values live in docker/.env (copied from .env.example).
+# This file should not need edits for normal operation or hardware changes.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # DATABASE — PostgreSQL with pgvecto-rs extension (required by Immich)
+  # ---------------------------------------------------------------------------
+  immich-postgres:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.3.0
+    container_name: immich-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${IMMICH_DB_NAME:-immich}
+      POSTGRES_USER: ${IMMICH_DB_USERNAME:-immich}
+      POSTGRES_PASSWORD: ${IMMICH_DB_PASSWORD:?IMMICH_DB_PASSWORD must be set in docker/.env}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      # Named volume: survives `docker compose down`, outlives container rebuilds.
+      # Volume name is prefixed "immich_" — consistent with all other Immich volumes.
+      # Phase 3 (mergerfs): keep this as a named volume; Docker manages it on the
+      # OS drive for performance. Only the photo library moves to the mergerfs mount.
+      - immich_db_data:/var/lib/postgresql/data
+    networks:
+      - homelab
+    # Port intentionally NOT exposed to the host. The server-manager connects to
+    # Immich via the HTTP API (port 2283), not directly to the database port.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+
+  # ---------------------------------------------------------------------------
+  # CACHE — Redis (session store and job queue for Immich)
+  # ---------------------------------------------------------------------------
+  immich-redis:
+    image: docker.io/redis:6.2-alpine
+    container_name: immich-redis
+    restart: unless-stopped
+    networks:
+      - homelab
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # APPLICATION SERVER — main Immich API + web UI
+  # ---------------------------------------------------------------------------
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-release}
+    container_name: immich-server
+    restart: unless-stopped
+    depends_on:
+      immich-postgres:
+        condition: service_healthy
+      immich-redis:
+        condition: service_healthy
+    environment:
+      DB_HOSTNAME: immich-postgres
+      DB_DATABASE_NAME: ${IMMICH_DB_NAME:-immich}
+      DB_USERNAME: ${IMMICH_DB_USERNAME:-immich}
+      DB_PASSWORD: ${IMMICH_DB_PASSWORD:?IMMICH_DB_PASSWORD must be set in docker/.env}
+      REDIS_HOSTNAME: immich-redis
+      # Machine-learning container reachable by name inside the homelab network.
+      IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
+    volumes:
+      - ${IMMICH_UPLOAD_LOCATION:?IMMICH_UPLOAD_LOCATION must be set in docker/.env}:/usr/src/app/upload
+      # Phase 3: change IMMICH_UPLOAD_LOCATION in .env to your mergerfs path, e.g.
+      #   IMMICH_UPLOAD_LOCATION=/mnt/storage/immich/library
+      # No edits to this file needed.
+      - /etc/localtime:/etc/localtime:ro
+    # EXTERNAL LIBRARY (optional) — uncomment when IMMICH_EXTERNAL_PATH is set in .env
+    # - ${IMMICH_EXTERNAL_PATH}:/usr/src/app/external:ro
+    ports:
+      # Bound to 127.0.0.1 only (localhost, not all interfaces).
+      # This lets the immich-server-manager systemd service reach the Immich API
+      # from the host without exposing port 2283 on the LAN.
+      #
+      # When you add a reverse proxy (Caddy/NPM), the proxy joins the homelab
+      # network and routes directly to `immich-server:2283`, so you can change
+      # this to `expose: ["2283"]` and remove the host binding entirely.
+      - "127.0.0.1:2283:2283"
+    networks:
+      - homelab
+
+  # ---------------------------------------------------------------------------
+  # MACHINE LEARNING — CLIP embeddings + facial recognition inference
+  # ---------------------------------------------------------------------------
+  immich-ml:
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-release}
+    container_name: immich-ml
+    restart: unless-stopped
+
+    # =========================================================================
+    # GPU ASSIGNMENT — PHASE 3 HARDWARE SWAP INSTRUCTIONS
+    # =========================================================================
+    # This service uses an explicit device_ids list instead of
+    # NVIDIA_VISIBLE_DEVICES=all, so it can be pinned to a specific GPU
+    # independently of every other service (Jellyfin, Ollama, etc.).
+    #
+    # TO CHANGE THE GPU FOR THIS SERVICE:
+    #   1. Do NOT edit this file.
+    #   2. Open docker/.env and change: IMMICH_ML_GPU_ID=<new-id>
+    #   3. Run: docker compose ... up -d immich-ml   (restarts only this service)
+    #
+    # TO FIND YOUR GPU IDs after a hardware swap:
+    #   nvidia-smi --query-gpu=index,name,uuid --format=csv
+    #
+    # ID FORMATS (both work, UUID is stable across reboots/reinstalls):
+    #   Index:  IMMICH_ML_GPU_ID=0          (first GPU)
+    #   Index:  IMMICH_ML_GPU_ID=1          (second GPU)
+    #   UUID:   IMMICH_ML_GPU_ID=GPU-a1b2c3d4-...  (survives PCIe slot changes)
+    #
+    # NO GPU / CPU-ONLY MODE:
+    #   Remove or comment out the entire `deploy:` block below.
+    #   Immich ML will fall back to CPU inference (slower but functional).
+    #
+    # MULTIPLE GPU SERVICES:
+    #   Jellyfin will have JELLYFIN_GPU_ID in .env → assigned in jellyfin.yml
+    #   Ollama will have OLLAMA_GPU_ID in .env → assigned in ollama.yml
+    #   Each service's device_ids block is fully independent.
+    # =========================================================================
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${IMMICH_ML_GPU_ID:-0}"]
+              capabilities: [gpu]
+
+    environment:
+      MACHINE_LEARNING_CACHE_FOLDER: /cache
+    volumes:
+      # Named volume for downloaded ML models (CLIP, facial recognition weights).
+      # Persists across container restarts so models don't re-download every update.
+      - immich_ml_cache:/cache
+    # Port NOT exposed to host — immich-server reaches this via the homelab network.
+    expose:
+      - "3003"
+    networks:
+      - homelab
+
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+# Naming convention: {stack}_{purpose}
+#   - Explicit `name:` keeps the volume name stable regardless of the Compose
+#     project name or the directory this file is run from.
+#   - All Immich volumes are prefixed "immich_" for easy identification in
+#     `docker volume ls` as the homelab grows.
+volumes:
+  immich_db_data:
+    name: immich_db_data
+    # Phase 3 note: keep database on the OS/SSD drive (this named volume),
+    # not on the mergerfs pool. Random I/O on spinners degrades DB performance.
+
+  immich_ml_cache:
+    name: immich_ml_cache
+    # Holds downloaded model weights (~1-2 GB). Named volume keeps them across
+    # `docker compose down` and container image updates.
+
+
+# =============================================================================
+# NETWORK
+# =============================================================================
+# Declared as external: core.yml creates it; every stack just attaches to it.
+# This is what allows a reverse proxy in proxy.yml (or jellyfin.yml, etc.)
+# to reach immich-server:2283 by container name without host port bindings.
+networks:
+  homelab:
+    external: true
+    name: homelab

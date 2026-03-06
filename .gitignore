@@ -35,6 +35,10 @@ env/
 server-manager/config/config.yaml
 photo-curator/config/config.yaml
 
+# Docker Compose live env file (contains secrets — never commit)
+# Commit docker/.env.example instead
+docker/.env
+
 # Data directories
 server-manager/data/*.db
 photo-curator/data/*.db
