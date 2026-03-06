@@ -46,6 +46,19 @@ sudo journalctl -u immich-server-manager | grep "Feature Name"
 
 ---
 
+## Python Dependencies
+
+`photo-curator` has two requirements files:
+
+| File | What goes here | Installed by |
+|------|---------------|--------------|
+| `requirements.txt` | Core deps; installs in <30s on a clean machine | `session-start.sh` + install script |
+| `requirements-ml.txt` | Heavy ML deps (dlib, torch, etc.); require compilation or >100 MB | Install script only (not cloud sessions) |
+
+**Rule for new deps:** If `pip install <package>` on a fresh machine takes more than 30 seconds or requires a C/C++ toolchain, put it in `requirements-ml.txt`. Otherwise, `requirements.txt` is fine.
+
+---
+
 ## Which Doc Gets Updated for What
 
 | What changed | Update these docs |

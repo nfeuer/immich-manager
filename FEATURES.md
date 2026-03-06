@@ -241,6 +241,7 @@ sudo journalctl -u photo-curator | grep -i "reminder"
 ### ✅ Face Recognition
 **Component:** `photo-curator/src/analyzer.py`
 **Details:** 128-dimensional dlib embeddings, greedy identity clustering, user labelling and merge
+**ML deps required:** `pip install -r photo-curator/requirements-ml.txt` (dlib, face_recognition)
 
 **Validate:**
 ```bash
@@ -254,6 +255,7 @@ curl "http://localhost:8081/api/photos/2024/1" \
 ### ✅ Scene Detection
 **Component:** `photo-curator/src/analyzer.py`
 **Details:** MobileNetV2-Places365, 10 super-categories (indoor, outdoor, nature, urban, etc.)
+**ML deps required:** `pip install -r photo-curator/requirements-ml.txt` (torch, torchvision)
 
 **Validate:** Scene categories appear in photo analysis results (check `/api/photos/{year}/{month}` response).
 
