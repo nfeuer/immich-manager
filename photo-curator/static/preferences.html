@@ -175,9 +175,35 @@
             await loadPreferences();
         });
 
+        // Fetch with timeout helper
+        async function fetchWithTimeout(url, options = {}, timeout = 30000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timed out');
+                }
+                throw error;
+            }
+        }
+
         async function checkAuth() {
             try {
-                const response = await fetch('/api/auth/check');
+                const response = await fetchWithTimeout('/api/auth/check', {}, 10000);
+
+                if (!response.ok) {
+                    throw new Error(`Authentication failed (HTTP ${response.status})`);
+                }
+
                 const data = await response.json();
 
                 if (!data.authenticated) {
@@ -188,13 +214,19 @@
                 currentUser = data.user;
             } catch (error) {
                 console.error('Auth check failed:', error);
-                alert('Authentication failed. Please login to Immich first.');
+                showAlert('error', `Authentication failed: ${error.message}. Please login to Immich first.`);
             }
         }
 
         async function loadPreferences() {
             try {
-                const response = await fetch('/api/preferences');
+                const response = await fetchWithTimeout('/api/preferences', {}, 15000);
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Failed to load preferences (HTTP ${response.status}): ${errorText}`);
+                }
+
                 const prefs = await response.json();
 
                 // Email notifications
@@ -208,6 +240,7 @@
 
             } catch (error) {
                 console.error('Error loading preferences:', error);
+                showAlert('error', `Failed to load preferences: ${error.message}. Using defaults.`);
             }
         }
 
@@ -233,14 +266,15 @@
                     }
                 };
 
-                const response = await fetch('/api/preferences', {
+                const response = await fetchWithTimeout('/api/preferences', {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(prefs)
-                });
+                }, 15000);
 
                 if (!response.ok) {
-                    throw new Error('Failed to save preferences');
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Failed to save (HTTP ${response.status}): ${errorText}`);
                 }
 
                 showAlert('success', '✓ Preferences saved successfully!');

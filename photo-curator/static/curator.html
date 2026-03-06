@@ -44,6 +44,21 @@
         .fade-in {
             animation: fadeIn 0.3s ease-in;
         }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .animate-slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
     </style>
 </head>
 <body class="bg-black dark:bg-immich-bg text-gray-900 dark:text-gray-100 min-h-screen">
@@ -144,6 +159,11 @@
 
         <!-- Content Area -->
         <div class="px-4 sm:px-6 lg:px-8 pb-32">
+            <!-- Notification Toast -->
+            <div id="notification" class="hidden fixed top-20 right-4 z-50 max-w-md animate-slide-in">
+                <div id="notificationContent" class="rounded-lg shadow-lg p-4 border"></div>
+            </div>
+
             <div id="content" class="fade-in">
                 <div class="text-center py-16 text-gray-500 dark:text-immich-gray-400">
                     <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="currentColor" viewBox="0 0 24 24">
@@ -218,7 +238,12 @@
 
         async function checkAuth() {
             try {
-                const response = await fetch('/api/auth/check');
+                const response = await fetchWithTimeout('/api/auth/check', {}, 10000);
+
+                if (!response.ok) {
+                    throw new Error(`Authentication failed (HTTP ${response.status})`);
+                }
+
                 const data = await response.json();
 
                 if (!data.authenticated) {
@@ -231,7 +256,65 @@
 
             } catch (error) {
                 console.error('Auth check failed:', error);
-                alert('Authentication failed. Please login to Immich first.');
+                showNotification('error', `Authentication failed: ${error.message}. Please login to Immich first.`);
+            }
+        }
+
+        // Fetch with timeout helper
+        async function fetchWithTimeout(url, options = {}, timeout = 30000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timed out');
+                }
+                throw error;
+            }
+        }
+
+        // Notification system
+        function showNotification(type, message, duration = 5000) {
+            const notification = document.getElementById('notification');
+            const content = document.getElementById('notificationContent');
+
+            const colors = {
+                success: 'bg-green-50 dark:bg-green-900/20 border-green-500 dark:border-green-700 text-green-800 dark:text-green-200',
+                error: 'bg-red-50 dark:bg-red-900/20 border-red-500 dark:border-red-700 text-red-800 dark:text-red-200',
+                warning: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-500 dark:border-yellow-700 text-yellow-800 dark:text-yellow-200',
+                info: 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-700 text-blue-800 dark:text-blue-200'
+            };
+
+            const icons = {
+                success: '✓',
+                error: '✕',
+                warning: '⚠',
+                info: 'ℹ'
+            };
+
+            content.className = `rounded-lg shadow-lg p-4 border ${colors[type]}`;
+            content.innerHTML = `
+                <div class="flex items-start">
+                    <span class="text-xl mr-3">${icons[type]}</span>
+                    <div class="flex-1">${message}</div>
+                    <button onclick="document.getElementById('notification').classList.add('hidden')" class="ml-4 text-lg font-bold opacity-50 hover:opacity-100">×</button>
+                </div>
+            `;
+
+            notification.classList.remove('hidden');
+
+            if (duration > 0) {
+                setTimeout(() => {
+                    notification.classList.add('hidden');
+                }, duration);
             }
         }
 
@@ -248,7 +331,13 @@
             `;
 
             try {
-                const response = await fetch(`/api/photos/${currentYear}/${currentMonth}`);
+                const response = await fetchWithTimeout(`/api/photos/${currentYear}/${currentMonth}`);
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Failed to load photos (HTTP ${response.status}): ${errorText}`);
+                }
+
                 const data = await response.json();
 
                 allPhotos = data.photos || [];
@@ -265,18 +354,17 @@
                 renderUI();
             } catch (error) {
                 console.error('Error loading photos:', error);
-                content.textContent = '';
-                const errDiv = document.createElement('div');
-                errDiv.className = 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 text-yellow-800 dark:text-yellow-200';
-                const p1 = document.createElement('p');
-                p1.className = 'font-medium';
-                p1.textContent = 'Error loading photos';
-                const p2 = document.createElement('p');
-                p2.className = 'text-sm mt-1';
-                p2.textContent = 'Please check your connection and try again.';
-                errDiv.appendChild(p1);
-                errDiv.appendChild(p2);
-                content.appendChild(errDiv);
+                const errorMsg = error.message || 'Unknown error occurred';
+                content.innerHTML = `
+                    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-800 dark:text-red-200">
+                        <p class="font-medium">Error loading photos</p>
+                        <p class="text-sm mt-1">${errorMsg}</p>
+                        <button onclick="loadPhotos()" class="mt-3 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+                showNotification('error', `Failed to load photos: ${errorMsg}`);
             }
         }
 
@@ -289,14 +377,20 @@
             }
 
             try {
-                const response = await fetch(`/api/analyze/${currentYear}/${currentMonth}`, {
+                const response = await fetchWithTimeout(`/api/analyze/${currentYear}/${currentMonth}`, {
                     method: 'POST'
-                });
+                }, 60000); // 60 second timeout for analysis
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Analysis failed (HTTP ${response.status}): ${errorText}`);
+                }
 
                 const data = await response.json();
-                alert(`Analysis started! Refresh in a few minutes to see results.`);
+                showNotification('success', `Analysis started! Processing ${data.photo_count || 'photos'}. Refresh in a few minutes to see results.`, 8000);
             } catch (error) {
-                window.alert('Error starting analysis. Please check your connection.');
+                console.error('Error starting analysis:', error);
+                showNotification('error', `Error starting analysis: ${error.message}`, 10000);
             }
         }
 
@@ -437,19 +531,27 @@
             const removed = aiSuggested.filter(id => !selectedPhotos.has(id));
 
             try {
-                await fetch(`/api/curation/${currentYear}/${currentMonth}/update`, {
+                const response = await fetchWithTimeout(`/api/curation/${currentYear}/${currentMonth}/update`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ selected, added, removed })
-                });
+                }, 15000);
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Failed to save (HTTP ${response.status}): ${errorText}`);
+                }
+
+                // Silent success - only show errors
             } catch (error) {
                 console.error('Error saving selection:', error);
+                showNotification('warning', `Failed to auto-save your selection: ${error.message}. Your changes may not be saved.`, 8000);
             }
         }
 
         async function createAlbum() {
             if (selectedPhotos.size === 0) {
-                alert('Please select at least one photo');
+                showNotification('warning', 'Please select at least one photo');
                 return;
             }
 
@@ -465,7 +567,7 @@
             btn.textContent = 'Creating...';
 
             try {
-                const response = await fetch(`/api/curation/${currentYear}/${currentMonth}/complete`, {
+                const response = await fetchWithTimeout(`/api/curation/${currentYear}/${currentMonth}/complete`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
@@ -473,13 +575,19 @@
                         album_name: albumName,
                         description: `Curated collection of ${selectedPhotos.size} photos`
                     })
-                });
+                }, 30000);
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Failed to create album (HTTP ${response.status}): ${errorText}`);
+                }
 
                 const data = await response.json();
-                alert(`✓ Album "${albumName}" created with ${selectedPhotos.size} photos!`);
+                showNotification('success', `✓ Album "${albumName}" created with ${selectedPhotos.size} photos!`, 10000);
                 btn.textContent = '✓ Album Created';
             } catch (error) {
-                alert('Error creating album: ' + error.message);
+                console.error('Error creating album:', error);
+                showNotification('error', `Error creating album: ${error.message}`, 10000);
                 btn.disabled = false;
                 btn.textContent = 'Create Album in Immich';
             }

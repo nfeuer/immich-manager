@@ -121,9 +121,35 @@
             await checkAuth();
         });
 
+        // Fetch with timeout helper
+        async function fetchWithTimeout(url, options = {}, timeout = 30000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timed out');
+                }
+                throw error;
+            }
+        }
+
         async function checkAuth() {
             try {
-                const response = await fetch('/api/auth/check');
+                const response = await fetchWithTimeout('/api/auth/check', {}, 10000);
+
+                if (!response.ok) {
+                    throw new Error(`Authentication failed (HTTP ${response.status})`);
+                }
+
                 const data = await response.json();
 
                 if (!data.authenticated) {
@@ -136,8 +162,18 @@
 
             } catch (error) {
                 console.error('Auth check failed:', error);
-                alert('Authentication failed. Please login to Immich first.');
+                showError('Authentication failed: ' + error.message + '. Please login to Immich first.');
             }
+        }
+
+        function showError(message) {
+            const content = document.getElementById('content');
+            content.innerHTML = `
+                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-800 dark:text-red-200">
+                    <p class="font-medium">Error</p>
+                    <p class="text-sm mt-1">${message}</p>
+                </div>
+            `;
         }
 
         async function scanDuplicates() {
@@ -153,7 +189,13 @@
             `;
 
             try {
-                const response = await fetch(`/api/photos/${currentYear}/${currentMonth}`);
+                const response = await fetchWithTimeout(`/api/photos/${currentYear}/${currentMonth}`);
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Failed to scan (HTTP ${response.status}): ${errorText}`);
+                }
+
                 const data = await response.json();
 
                 duplicateGroups = data.duplicates || [];
@@ -169,18 +211,15 @@
 
             } catch (error) {
                 console.error('Error scanning duplicates:', error);
-                content.textContent = '';
-                const errDiv = document.createElement('div');
-                errDiv.className = 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 text-yellow-800 dark:text-yellow-200';
-                const p1 = document.createElement('p');
-                p1.className = 'font-medium';
-                p1.textContent = 'Error scanning for duplicates';
-                const p2 = document.createElement('p');
-                p2.className = 'text-sm mt-1';
-                p2.textContent = 'Please check your connection and try again.';
-                errDiv.appendChild(p1);
-                errDiv.appendChild(p2);
-                content.appendChild(errDiv);
+                content.innerHTML = `
+                    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-800 dark:text-red-200">
+                        <p class="font-medium">Error scanning for duplicates</p>
+                        <p class="text-sm mt-1">${error.message}</p>
+                        <button onclick="scanDuplicates()" class="mt-3 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm">
+                            Try Again
+                        </button>
+                    </div>
+                `;
             }
         }
 
@@ -356,14 +395,15 @@
 
         async function deleteDuplicates(assetIds) {
             try {
-                const response = await fetch('/api/duplicates/delete', {
+                const response = await fetchWithTimeout('/api/duplicates/delete', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ asset_ids: assetIds })
-                });
+                }, 30000);
 
                 if (!response.ok) {
-                    throw new Error('Failed to delete photos');
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    throw new Error(`Failed to delete (HTTP ${response.status}): ${errorText}`);
                 }
 
                 const data = await response.json();
@@ -371,7 +411,8 @@
 
             } catch (error) {
                 console.error('Error deleting duplicates:', error);
-                alert('Error deleting photos: ' + error.message);
+                alert('Error deleting photos: ' + error.message + '\n\nPlease try again or check the server logs.');
+                throw error; // Re-throw to prevent UI from updating on error
             }
         }
 
