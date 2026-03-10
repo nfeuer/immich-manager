@@ -7,16 +7,57 @@ This document contains all the configuration settings, required services, and se
 ## 📋 Quick Start Checklist
 
 **Before You Begin:**
+- [ ] Ubuntu/Debian Linux with sudo access
+- [ ] Storage drives set up (see [Drive Setup](#-drive-setup-mergerfs--snapraid) below)
 - [ ] Immich instance running and accessible
-- [ ] Python 3.9+ installed
-- [ ] Docker installed (for Immich)
 - [ ] Domain name for Cloudflare Tunnel (optional but recommended)
+
+> **Note:** Python, Docker, Docker Compose, and other software prerequisites are installed automatically by the setup scripts. You do not need to install them manually.
 
 **Required Setup:**
 - [ ] Configure Immich API access
 - [ ] Set up SMTP for email notifications (optional)
 - [ ] Configure Cloudflare Tunnel (for remote access)
 - [ ] Set curator URL for email links
+
+---
+
+## 💾 Drive Setup: mergerfs + SnapRAID
+
+Before installing Immich Manager, set up your storage drives using [mergerfs-snapraid](https://github.com/nfeuer/mergerfs-snapraid). This creates a unified storage pool for Immich's photo library protected against drive failure.
+
+### Why Do This First?
+
+- Immich should store photos on dedicated data drives, not the OS disk
+- mergerfs pools multiple drives into a single mount point (e.g. `/mnt/storage`)
+- SnapRAID adds parity protection — one drive failure won't lose data
+- The prerequisite check in `00-check-prerequisites.sh` looks for `/mnt/storage` or `/mnt/user`
+
+### Steps
+
+```bash
+git clone https://github.com/nfeuer/mergerfs-snapraid.git
+cd mergerfs-snapraid
+sudo ./setup-mergerfs-snapraid.sh
+```
+
+The script will:
+1. Detect available disks
+2. Guide you through selecting data drives and a parity drive
+3. Format drives (with safety confirmations)
+4. Install mergerfs and SnapRAID
+5. Configure `/etc/fstab` and `/etc/snapraid.conf`
+6. Set up systemd timers for daily sync (2 AM) and weekly scrub (Sundays 3 AM)
+
+### Requirements
+
+- 2+ data drives (mixed sizes are fine)
+- 1 parity drive (must be >= the size of your largest data drive)
+- Root/sudo access
+
+### After Setup
+
+Your pool will be mounted at `/mnt/storage` (or `/mnt/user`). When installing Immich, point its upload path there (e.g. `/mnt/storage/immich`).
 
 ---
 
@@ -421,22 +462,32 @@ chmod 755 /mnt/backups/immich
 
 ### Phase-by-Phase Installation
 
+Run the master installer which executes all phases in sequence:
+
 ```bash
-# 1. Prerequisites check
+./install.sh
+```
+
+Or run individual phases manually:
+
+```bash
+# 0. Prerequisites check (reports missing software + install commands)
 ./scripts/00-check-prerequisites.sh
 
-# 2. Install Server Manager
+# 1. Install Server Manager (also installs smartmontools)
 ./scripts/10-install-server-manager.sh
 
-# 3. Install Photo Curator
+# 2. Install Photo Curator (also installs OpenCV system libs + ML/AI Python packages)
 ./scripts/20-install-photo-curator.sh
 
-# 4. Configure Remote Access (Cloudflare)
+# 3. Configure Remote Access (Cloudflare)
 ./scripts/30-install-remote-access.sh
 
-# 5. Security Hardening
+# 4. Security Hardening
 ./scripts/40-security-hardening.sh
 ```
+
+> The install scripts automatically install system-level prerequisites (smartmontools, OpenCV libraries, ML dependencies) via `apt` and `pip`. You do not need to install these manually before running.
 
 ### Manual Startup (for testing)
 
@@ -726,5 +777,5 @@ sudo journalctl -u photo-curator -f
 
 ---
 
-*Last Updated: 2025-11-22*
+*Last Updated: 2026-03-10*
 *Questions? Check claude.md for additional feature documentation.*

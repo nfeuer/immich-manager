@@ -15,42 +15,73 @@ Immich Manager is a production-ready ecosystem that adds essential features to y
 Before starting, ensure you have:
 
 - [ ] Ubuntu/Debian Linux
-- [ ] Immich already installed and running at http://localhost:2283
-- [ ] Python 3.9 or higher
-- [ ] Docker and Docker Compose
-- [ ] 10GB+ free disk space
 - [ ] sudo access
+- [ ] 10GB+ free disk space
+
+> **Note:** The installer automatically handles all software prerequisites (Python, Docker, Docker Compose, system libraries, etc.). You do not need to install them manually.
+
+## Step 0: Set Up Storage Drives (Recommended)
+
+If you are using multiple data drives, set up mergerfs + SnapRAID **before** running the Immich Manager installer. This creates a unified storage pool at `/mnt/storage` (or `/mnt/user`) for Immich's photo library.
+
+```bash
+git clone https://github.com/nfeuer/mergerfs-snapraid.git
+cd mergerfs-snapraid
+sudo ./setup-mergerfs-snapraid.sh
+```
+
+**What this does:**
+- Merges multiple drives into a single pool (e.g. `/mnt/storage`)
+- Adds parity protection against a single drive failure
+- Sets up automated daily sync and weekly scrub (systemd timers)
+- Drives do not need to be the same size
+
+**Requirements for this step:**
+- 2+ data drives
+- 1 parity drive (must be >= the largest data drive)
+
+See [mergerfs-snapraid](https://github.com/nfeuer/mergerfs-snapraid) for full details.
+
+Once your storage pool is ready, proceed with the Immich Manager installation below.
+
+---
+
+## Installation (5 Minutes)
+
+### 1. Install Immich
+
+Immich must be running before the manager is installed.
 
 **Verify Immich is running:**
 ```bash
 curl http://localhost:2283/api/server-info
 ```
 
-## Installation (5 Minutes)
+If not yet installed, follow the [Immich Docker Compose guide](https://immich.app/docs/install/docker-compose). Point the upload path at your storage pool (e.g. `/mnt/storage/immich`).
 
-### 1. Clone Repository
+### 2. Clone Repository
 
 ```bash
 git clone https://github.com/yourusername/immich-manager.git
 cd immich-manager
 ```
 
-### 2. Run Installer
+### 3. Run Installer
 
 ```bash
 ./install.sh
 ```
 
 The installer will:
-1. Check prerequisites ✓
-2. Install Server Manager ✓
-3. Install Photo Curator ✓
+1. Check prerequisites (and install any missing software automatically) ✓
+2. Install Server Manager (includes smartmontools) ✓
+3. Install Photo Curator (includes ML/AI libraries) ✓
 4. Optionally set up remote access
 5. Apply security hardening
 
-**Installation takes about 30-60 minutes total.**
+**Installation takes about 30-60 minutes total** (ML/AI library downloads are the main time cost).
 
-### 3. Configure Services
+### 4. Configure Services
 
 #### Server Manager Configuration
 
@@ -101,14 +132,14 @@ curation:
   reminder_day: 1     # Day of month for reminders
 ```
 
-### 4. Restart Services
+### 5. Restart Services
 
 ```bash
 sudo systemctl restart immich-server-manager
 sudo systemctl restart photo-curator
 ```
 
-### 5. Verify Installation
+### 6. Verify Installation
 
 ```bash
 # Check services are running
@@ -287,7 +318,7 @@ python -c "import requests; print(requests.get('http://localhost:2283/api/server
 ### Disk Monitoring Not Working
 
 ```bash
-# Install smartmontools
+# smartmontools is installed automatically by the installer, but if missing:
 sudo apt install smartmontools
 
 # Test manually
