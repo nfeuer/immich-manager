@@ -150,6 +150,9 @@
     </div>
 
     <script>
+        // ── Helpers ──────────────────────────────────────────────────────────
+        function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
         // ── State ────────────────────────────────────────────────────────────
         let immichBaseUrl = '';
         let pendingEventId = null;
@@ -189,8 +192,8 @@
                 const data = await r.json();
                 allEvents = data.events || [];
                 if (allEvents.length === 0) {
-                    // No cached suggestions — run detection automatically
-                    await runDetection(/*silent=*/true);
+                    hideLoading();
+                    showEmpty();
                 } else {
                     renderEvents(allEvents);
                 }
@@ -270,7 +273,7 @@
 
             card.innerHTML = `
                 <div class="relative aspect-video bg-immich-gray-800 overflow-hidden">
-                    <img src="${thumbUrl}" alt="${dateLabel}"
+                    <img src="${esc(thumbUrl)}" alt="${esc(dateLabel)}"
                         class="w-full h-full object-cover"
                         onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden')">
                     <div class="hidden absolute inset-0 flex items-center justify-center">
@@ -278,22 +281,23 @@
                             <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
                         </svg>
                     </div>
-                    ${kindLabel ? `<span class="absolute top-2 left-2 px-2 py-0.5 rounded-full text-xs font-semibold bg-black/50 text-white backdrop-blur-sm">${kindLabel}</span>` : ''}
-                    <span class="absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-semibold bg-immich-primary/90 text-white backdrop-blur-sm">${evt.photo_count} photos</span>
+                    ${kindLabel ? `<span class="absolute top-2 left-2 px-2 py-0.5 rounded-full text-xs font-semibold bg-black/50 text-white backdrop-blur-sm">${esc(kindLabel)}</span>` : ''}
+                    <span class="absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-semibold bg-immich-primary/90 text-white backdrop-blur-sm">${esc(String(evt.photo_count))} photos</span>
                 </div>
                 <div class="p-4">
-                    ${locationLabel ? `<p class="text-xs font-semibold text-immich-primary truncate mb-0.5">${locationLabel}</p>` : ''}
-                    <p class="font-medium text-gray-900 dark:text-white text-sm truncate">${dateLabel}</p>
-                    ${participantStr ? `<p class="text-xs text-gray-500 dark:text-immich-gray-400 mt-0.5 truncate">👥 ${participantStr}</p>` : ''}
+                    ${locationLabel ? `<p class="text-xs font-semibold text-immich-primary truncate mb-0.5">${esc(locationLabel)}</p>` : ''}
+                    <p class="font-medium text-gray-900 dark:text-white text-sm truncate">${esc(dateLabel)}</p>
+                    ${participantStr ? `<p class="text-xs text-gray-500 dark:text-immich-gray-400 mt-0.5 truncate">👥 ${esc(participantStr)}</p>` : ''}
                     <div class="flex gap-2 mt-3">
-                        <button onclick="openModal(${evt.id})"
+                        <button onclick="openModal(${Number(evt.id)})"
                             class="flex-1 px-3 py-2 bg-immich-primary text-white rounded-lg text-sm font-medium hover:bg-opacity-90 transition-all flex items-center justify-center gap-1.5">
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M20 6h-2.18c.07-.44.18-.88.18-1.36C18 2.53 15.48.05 12.36.05c-1.71 0-3.26.78-4.32 2.01C6.97 1.03 5.66.5 4.18.5 1.96.5.14 2.32.14 4.54c0 .48.1.92.18 1.36H0v2h20V6zM20 9H4v12h16V9zm-10 4h4v2h-4v-2z"/>
                             </svg>
                             Create Album
                         </button>
-                        <button onclick="dismissEvent(${evt.id})" title="Not interested"
+                        <button onclick="dismissEvent(${Number(evt.id)})"
+                            aria-label="Dismiss this event suggestion" title="Dismiss suggestion"
                             class="px-3 py-2 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-500 dark:text-immich-gray-400 hover:border-red-400 hover:text-red-500 dark:hover:border-red-500 dark:hover:text-red-400 transition-all text-sm font-medium">
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
@@ -450,7 +454,8 @@
             content.textContent = msg;
             toast.classList.remove('hidden');
             clearTimeout(toastTimer);
-            toastTimer = setTimeout(() => toast.classList.add('hidden'), 4000);
+            const duration = type === 'error' ? 8000 : type === 'warning' ? 6000 : 4000;
+            toastTimer = setTimeout(() => toast.classList.add('hidden'), duration);
         }
 
         // Close modal on Escape

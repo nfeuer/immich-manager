@@ -313,6 +313,10 @@
                 body: formData,
                 credentials: 'include',
             });
+            if (res.status === 429) {
+                const retryAfter = res.headers.get('Retry-After') || '60';
+                throw new Error(`Too many requests — please wait ${retryAfter}s before uploading again.`);
+            }
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.detail || `Upload failed (${res.status})`);
@@ -327,10 +331,29 @@
         }
     }
 
+    // -- Server path validation --
+    function validateServerPath(path) {
+        if (!path.startsWith('/')) {
+            showError('Path must be absolute (must start with /)');
+            return false;
+        }
+        const forbidden = ['/etc', '/proc', '/sys', '/dev', '/root', '/boot', '/bin', '/sbin', '/usr/bin', '/usr/sbin'];
+        if (forbidden.some(f => path === f || path.startsWith(f + '/'))) {
+            showError('This path is not allowed. Please enter a data directory (e.g. /mnt/data/Takeout)');
+            return false;
+        }
+        if (path.includes('../') || path.includes('/..')) {
+            showError('Path traversal sequences (../) are not allowed');
+            return false;
+        }
+        return true;
+    }
+
     // -- Server path import --
     async function startServerPathImport() {
         const serverPath = document.getElementById('serverPath').value.trim();
         if (!serverPath || !selectedSource) return;
+        if (!validateServerPath(serverPath)) return;
 
         showError(null);
 
@@ -341,6 +364,10 @@
                 body: JSON.stringify({ source_type: selectedSource, server_path: serverPath }),
                 credentials: 'include',
             });
+            if (res.status === 429) {
+                const retryAfter = res.headers.get('Retry-After') || '60';
+                throw new Error(`Too many requests — please wait ${retryAfter}s before starting import again.`);
+            }
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.detail || `Import start failed (${res.status})`);
