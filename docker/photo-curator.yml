@@ -1,0 +1,49 @@
+# =============================================================================
+# photo-curator.yml — Photo Curator service (AI-powered photo curation)
+# =============================================================================
+# Usage:
+#   docker compose --env-file docker/.env \
+#     -f docker/core.yml -f docker/photo-curator.yml up -d
+#
+# GPU: Assign GTX 1080 (or whichever GPU) via PHOTO_CURATOR_GPU_ID in .env
+# =============================================================================
+
+services:
+  photo-curator:
+    build:
+      context: ../photo-curator
+      dockerfile: Dockerfile
+    container_name: photo-curator
+    restart: unless-stopped
+    ports:
+      # Exposed for direct LAN access. Remove if using Caddy reverse proxy only.
+      - "8081:8081"
+    volumes:
+      # Persistent data (SQLite DB, downloaded ML models, analysis cache)
+      - photo_curator_data:/app/data
+      # Config file — edit on host, restart container to apply
+      - ../photo-curator/config/config.yaml:/app/config/config.yaml:ro
+    environment:
+      # Environment variables for config.yaml substitution
+      - IMMICH_API_KEY=${IMMICH_API_KEY:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+    # GPU assignment — uses PHOTO_CURATOR_GPU_ID from docker/.env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${PHOTO_CURATOR_GPU_ID:-0}"]
+              capabilities: [gpu]
+    networks:
+      - homelab
+
+volumes:
+  photo_curator_data:
+    name: photo_curator_data
+
+networks:
+  homelab:
+    external: true
+    name: homelab

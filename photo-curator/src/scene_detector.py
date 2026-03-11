@@ -94,8 +94,9 @@ _LABELS_FILENAME = "categories_places365.txt"
 class SceneDetector:
     """Classify photos into scene super-categories using Places365."""
 
-    def __init__(self, model_dir: str = "data/models"):
+    def __init__(self, model_dir: str = "data/models", device: Optional[Any] = None):
         self.model_dir = Path(model_dir)
+        self._device = device  # torch.device or None (defaults to CPU inside _ensure_model)
         self._model = None
         self._labels: Optional[List[str]] = None
         self._transform = None
@@ -137,12 +138,13 @@ class SceneDetector:
         import torch  # noqa: PLC0415
 
         tensor = self._transform(img).unsqueeze(0)  # (1, 3, 224, 224)
+        tensor = tensor.to(self._device if self._device is not None else torch.device("cpu"))  # move input to same device as model
 
         with torch.no_grad():
             logits = self._model(tensor)
             probs = torch.nn.functional.softmax(logits, dim=1)[0]
 
-        probs_np = probs.numpy()
+        probs_np = probs.cpu().numpy()  # .cpu() required when tensor is on GPU
         top_indices = probs_np.argsort()[::-1][:3]
 
         top3 = []
@@ -228,6 +230,8 @@ class SceneDetector:
         }
         model.load_state_dict(state_dict)
         model.eval()
+        _eff_dev = self._device if self._device is not None else torch.device("cpu")
+        model = model.to(_eff_dev)  # move to GPU if available
         self._model = model
 
         self._transform = transforms.Compose(

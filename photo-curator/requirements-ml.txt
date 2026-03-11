@@ -10,5 +10,7 @@ face_recognition>=1.3.0,<2.0
 dlib>=19.24,<20.0  # heavy: compiles from C++ source, 15-30 min on clean machine
 
 # Advanced AI: scene detection (Places365 MobileNetV2)
-torch>=2.0,<3.0        # heavy: ~2 GB download
+# NOTE: When running in Docker, the Dockerfile installs the CUDA-enabled torch build.
+# The lines below are for non-Docker / CPU-only installations:
+torch>=2.0,<3.0        # heavy: ~2 GB download (CPU build — Docker uses CUDA build)
 torchvision>=0.15,<1.0

@@ -17,14 +17,16 @@ logger = logging.getLogger(__name__)
 class PhotoAnalyzer:
     """Analyzes photos for quality scoring"""
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, device: Optional[Any] = None):
         """
         Initialize photo analyzer
 
         Args:
             config: Configuration dictionary with weights
+            device: torch.device (or None) passed through to GPU-aware sub-engines.
         """
         self.config = config or {}
+        self._device = device  # torch.device or None (sub-engines default to CPU)
 
         # Load face detection cascade
         self.face_cascade = None
@@ -58,7 +60,14 @@ class PhotoAnalyzer:
             return None
         try:
             from .face_recognition_engine import FaceRecognitionEngine  # noqa: PLC0415
-            self._face_engine = FaceRecognitionEngine()
+            use_cuda = getattr(self._device, 'type', 'cpu') != 'cpu' if self._device else False
+            # Also check dlib CUDA support
+            try:
+                import dlib  # noqa: PLC0415
+                dlib_has_cuda = getattr(dlib, 'DLIB_USE_CUDA', False)
+            except ImportError:
+                dlib_has_cuda = False
+            self._face_engine = FaceRecognitionEngine(use_cuda=use_cuda and dlib_has_cuda)
             logger.info("Face recognition engine initialised")
         except Exception as e:
             logger.warning(f"Face recognition unavailable: {e}")
@@ -74,7 +83,7 @@ class PhotoAnalyzer:
         try:
             from .scene_detector import SceneDetector  # noqa: PLC0415
             model_dir = self.config.get('ai', {}).get('model_dir', 'data/models')
-            self._scene_detector = SceneDetector(model_dir=model_dir)
+            self._scene_detector = SceneDetector(model_dir=model_dir, device=self._device)
             logger.info("Scene detector initialised")
         except Exception as e:
             logger.warning(f"Scene detection unavailable: {e}")

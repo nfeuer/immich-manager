@@ -40,13 +40,16 @@ class FaceRecognitionEngine:
     #: Euclidean distance below which two faces are considered the same person.
     DISTANCE_THRESHOLD = 0.6
 
-    def __init__(self, model: str = "small"):
+    def __init__(self, model: str = "small", use_cuda: bool = False):
         """
         Args:
             model: ``"small"`` (5-point landmarks, faster) or
                    ``"large"`` (68-point landmarks, slightly more accurate).
+            use_cuda: Use dlib CNN face detector (GPU-accelerated when dlib is
+                      CUDA-compiled).  Falls back to HOG if False.
         """
         self.model = model
+        self.use_cuda = use_cuda
         # Eagerly validate the import so startup fails fast if dlib is missing.
         _get_fr()
 
@@ -77,8 +80,9 @@ class FaceRecognitionEngine:
             logger.warning("Could not load image %s: %s", image_path, exc)
             return []
 
-        # HOG-based detector: fast, CPU-only.  For GPU, use model="cnn".
-        locations = fr.face_locations(img, model="hog")
+        # HOG-based detector: CPU-only. CNN detector uses GPU if dlib has CUDA.
+        detection_model = "cnn" if self.use_cuda else "hog"
+        locations = fr.face_locations(img, model=detection_model)
         if not locations:
             return []
 
