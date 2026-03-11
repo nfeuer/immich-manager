@@ -47,3 +47,31 @@ notifications:
     smtp_user: "${SMTP_USER:-your-email@gmail.com}"
     smtp_password: "${SMTP_PASSWORD}"  # Use env var: export SMTP_PASSWORD='your-app-password'
     from: "photo-curator@yourdomain.com"
+
+batch_processing:
+  enabled: true
+
+  # Scheduled automatic runs (in addition to manual trigger)
+  schedule:
+    enabled: false
+    time_window_start: "23:00"   # 24h format — only run within this window
+    time_window_end:   "06:00"   # Supports overnight windows (e.g., 23:00-06:00)
+
+  # Cadence / throttle controls — protect system from sustained load
+  cadence:
+    batch_size: 25               # Photos analyzed per batch
+    delay_between_batches: 5     # Seconds to rest between batches
+    max_cpu_percent: 80          # Pause processing if overall CPU% exceeds this
+
+  # GPU acceleration (GTX 1080 or similar)
+  gpu:
+    enabled: true
+    device: "cuda:0"             # Change to "cpu" to force CPU-only mode
+
+  # Error failsafe
+  errors:
+    batch_failure_percent: 50    # % of photos failed = batch counts as "failed"
+    max_consecutive_failures: 3  # Pause job if this many consecutive batches fail
+
+  # Default processing mode for scheduled runs
+  default_mode: "incremental"    # incremental | missing_vectors | full | retry_errors
