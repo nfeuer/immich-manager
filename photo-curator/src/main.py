@@ -24,6 +24,7 @@ import threading
 import uuid
 import shutil
 import importlib.util
+import html as html_lib
 import sdnotify
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -1161,13 +1162,16 @@ async def view_shared_album(request: Request, share_token: str):
     if html_path.exists():
         return html_path.read_text()
 
+    album_id_safe = html_lib.escape(str(share['album_id']))
+    can_add_safe = html_lib.escape(str(bool(share['can_add_photos'])))
+    token_safe = html_lib.escape(share_token)
     return HTMLResponse(f"""
     <html><head><title>Shared Album</title></head>
     <body>
         <h1>Shared Album</h1>
-        <p>Album ID: {share['album_id']}</p>
-        <p>Can add photos: {bool(share['can_add_photos'])}</p>
-        <p><a href="/api/shared/{share_token}/photos">View Photos (JSON)</a></p>
+        <p>Album ID: {album_id_safe}</p>
+        <p>Can add photos: {can_add_safe}</p>
+        <p><a href="/api/shared/{token_safe}/photos">View Photos (JSON)</a></p>
     </body></html>
     """)
 

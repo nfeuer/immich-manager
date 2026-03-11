@@ -337,16 +337,22 @@
             currentMonth = parseInt(document.getElementById('monthSelect').value);
 
             const content = document.getElementById('content');
+            // Skeleton screen — 12 placeholder cards while photos load
             content.innerHTML = `
-                <div class="text-center py-16">
-                    <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-immich-primary"></div>
-                    <p class="mt-4 text-gray-500 dark:text-immich-gray-400">Loading photos...</p>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2 py-4">
+                    ${Array.from({length: 12}, () => '<div class="animate-pulse aspect-square rounded-lg bg-immich-gray-800"></div>').join('')}
                 </div>
             `;
 
             try {
                 const response = await fetchWithTimeout(`/api/photos/${currentYear}/${currentMonth}`);
 
+                if (response.status === 429) {
+                    const retryAfter = response.headers.get('Retry-After') || '60';
+                    content.innerHTML = '';
+                    showNotification('warning', `Too many requests — please wait ${retryAfter}s before loading again.`, 8000);
+                    return;
+                }
                 if (!response.ok) {
                     const errorText = await response.text().catch(() => 'Unknown error');
                     throw new Error(`Failed to load photos (HTTP ${response.status}): ${errorText}`);
@@ -491,13 +497,15 @@
                 const safeId = escAttr(photo.asset_id);
                 const score = Number(photo.score) || 0;
 
+                const dateLabel = escAttr(photo.local_datetime ? photo.local_datetime.slice(0, 10) : '');
                 return `
                     <div class="photo-card relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-gray-100 dark:bg-immich-gray-800 group ${isSelected ? 'ring-4 ring-immich-primary ring-offset-2 dark:ring-offset-immich-bg' : ''} ${isAISuggested ? 'ring-2 ring-green-500' : ''}"
                          onclick="togglePhoto('${safeId}')">
                         <img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                              src="${thumbnailUrl}"
-                             alt="Photo"
-                             loading="lazy">
+                             alt="${dateLabel ? 'Photo from ' + dateLabel : 'Photo'}"
+                             loading="lazy"
+                             style="min-height:1px">
 
                         <!-- Overlay on hover -->
                         <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 flex items-center justify-center">
@@ -706,14 +714,14 @@
         function updateFocusVisual() {
             // Remove previous focus
             document.querySelectorAll('.photo-card').forEach(card => {
-                card.classList.remove('ring-2', 'ring-yellow-400');
+                card.classList.remove('ring-2', 'ring-white');
             });
 
             // Add focus to current photo
             const cards = document.querySelectorAll('.photo-card');
             if (focusedPhotoIndex >= 0 && focusedPhotoIndex < cards.length) {
                 const card = cards[focusedPhotoIndex];
-                card.classList.add('ring-2', 'ring-yellow-400');
+                card.classList.add('ring-2', 'ring-white');
 
                 // Scroll into view if needed
                 card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

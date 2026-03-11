@@ -181,16 +181,35 @@
             currentMonth = parseInt(document.getElementById('monthSelect').value);
 
             const content = document.getElementById('content');
+            // Skeleton screen — 6 placeholder groups while scan runs
+            const skeletonCard = () => `
+                <div class="flex flex-col gap-1">
+                    <div class="animate-pulse aspect-square rounded-lg bg-immich-gray-800"></div>
+                    <div class="flex gap-1">
+                        <div class="animate-pulse flex-1 h-7 rounded-lg bg-immich-gray-800"></div>
+                        <div class="animate-pulse flex-1 h-7 rounded-lg bg-immich-gray-800"></div>
+                    </div>
+                </div>`;
             content.innerHTML = `
-                <div class="text-center py-16">
-                    <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-immich-primary"></div>
-                    <p class="mt-4 text-gray-500 dark:text-immich-gray-400">Scanning for duplicates...</p>
+                <div class="space-y-6">
+                    ${Array.from({length: 2}, () => `
+                        <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-6">
+                            <div class="animate-pulse h-6 w-48 bg-immich-gray-800 rounded mb-4"></div>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                ${Array.from({length: 3}, skeletonCard).join('')}
+                            </div>
+                        </div>`).join('')}
                 </div>
             `;
 
             try {
                 const response = await fetchWithTimeout(`/api/photos/${currentYear}/${currentMonth}`);
 
+                if (response.status === 429) {
+                    const retryAfter = response.headers.get('Retry-After') || '60';
+                    showError(`Too many requests — please wait ${retryAfter}s before scanning again.`);
+                    return;
+                }
                 if (!response.ok) {
                     const errorText = await response.text().catch(() => 'Unknown error');
                     throw new Error(`Failed to scan (HTTP ${response.status}): ${errorText}`);
@@ -302,31 +321,27 @@
                 ? escAttr(thumbnailUrl) : '';
 
             return `
-                <div class="relative group">
-                    <div class="aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-immich-gray-800">
+                <div class="flex flex-col gap-1">
+                    <div class="relative aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-immich-gray-800">
                         <img class="w-full h-full object-cover"
                              src="${safeSrc}"
-                             alt="Photo"
+                             alt="Duplicate photo, quality score ${(score * 100).toFixed(0)}"
                              loading="lazy">
-                    </div>
-
-                    <!-- Info Overlay -->
-                    <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all rounded-lg flex items-center justify-center">
-                        <div class="opacity-0 group-hover:opacity-100 transition-opacity space-y-2">
-                            <button onclick="keepPhoto(${Number(groupIndex)}, ${Number(photoIndex)}, '${safeId}')"
-                                class="block w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg">
-                                Keep
-                            </button>
-                            <button onclick="deletePhoto(${Number(groupIndex)}, ${Number(photoIndex)}, '${safeId}')"
-                                class="block w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg">
-                                Delete
-                            </button>
+                        <!-- Quality Badge -->
+                        <div class="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded-md">
+                            ⭐ ${(score * 100).toFixed(0)}
                         </div>
                     </div>
-
-                    <!-- Quality Badge -->
-                    <div class="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded-md">
-                        ⭐ ${(score * 100).toFixed(0)}
+                    <!-- Always-visible action buttons (accessible on touch & keyboard) -->
+                    <div class="flex gap-1">
+                        <button onclick="keepPhoto(${Number(groupIndex)}, ${Number(photoIndex)}, '${safeId}')"
+                            class="flex-1 px-2 py-1.5 bg-green-600 hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-1 text-white text-xs font-medium rounded-lg transition-colors">
+                            Keep
+                        </button>
+                        <button onclick="deletePhoto(${Number(groupIndex)}, ${Number(photoIndex)}, '${safeId}')"
+                            class="flex-1 px-2 py-1.5 bg-red-600 hover:bg-red-700 focus:ring-2 focus:ring-red-500 focus:ring-offset-1 text-white text-xs font-medium rounded-lg transition-colors">
+                            Delete
+                        </button>
                     </div>
                 </div>
             `;

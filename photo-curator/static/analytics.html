@@ -191,11 +191,30 @@
             }
         }
 
+        let lastAnalyticsData = null;
+
+        function showMetricSkeletons() {
+            ['totalUsers', 'photosCurated', 'albumsCreated', 'avgQuality'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = '<span class="inline-block animate-pulse bg-immich-gray-700 rounded h-8 w-16">&nbsp;</span>';
+            });
+        }
+
         async function loadAnalytics() {
             const period = document.getElementById('timePeriod').value;
+            showMetricSkeletons();
 
             try {
                 const response = await fetchWithTimeout(`/api/analytics?period=${period}`, {}, 20000);
+                if (response.status === 429) {
+                    const retryAfter = response.headers.get('Retry-After') || '60';
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-500 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded-lg mb-4';
+                    errorDiv.textContent = `Too many requests — please wait ${retryAfter}s before refreshing.`;
+                    document.querySelector('.px-4.sm\\:px-6.lg\\:px-8.py-8').prepend(errorDiv);
+                    setTimeout(() => errorDiv.remove(), 8000);
+                    return;
+                }
                 if (!response.ok) {
                     const errorText = await response.text().catch(() => 'Unknown error');
                     throw new Error(`Failed to load analytics (HTTP ${response.status}): ${errorText}`);
@@ -226,6 +245,7 @@
                     }))
                 };
 
+                lastAnalyticsData = data;
                 updateMetrics(data);
                 updateCharts(data);
                 updateUserTable(data);
@@ -373,6 +393,11 @@
                 </tr>
             `).join('');
         }
+
+        // Re-render charts when dark mode is toggled
+        new MutationObserver(() => {
+            if (lastAnalyticsData) updateCharts(lastAnalyticsData);
+        }).observe(document.documentElement, { attributeFilter: ['class'] });
 
         // Load on page load
         document.addEventListener('DOMContentLoaded', () => {

@@ -1,178 +1,49 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Immich Server Manager</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'immich-primary': '#4250af',
+                        'immich-bg': '#000000',
+                        'immich-gray': {
+                            50: '#f9fafb',
+                            100: '#f3f4f6',
+                            200: '#e5e7eb',
+                            300: '#d1d5db',
+                            400: '#9ca3af',
+                            500: '#6b7280',
+                            600: '#4b5563',
+                            700: '#374151',
+                            800: '#1f2937',
+                            900: '#111827',
+                        }
+                    }
+                }
+            }
         }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        header {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        h1 {
-            color: #2563eb;
-            margin-bottom: 5px;
-        }
-
-        .subtitle {
-            color: #666;
-            font-size: 14px;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        .card {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .card h2 {
-            font-size: 18px;
-            margin-bottom: 15px;
-            color: #1f2937;
-            border-bottom: 2px solid #e5e7eb;
-            padding-bottom: 10px;
-        }
-
-        .stat {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px solid #f3f4f6;
-        }
-
-        .stat:last-child {
-            border-bottom: none;
-        }
-
-        .stat-label {
-            color: #6b7280;
-            font-size: 14px;
-        }
-
-        .stat-value {
-            font-weight: 600;
-            font-size: 16px;
-        }
-
-        .status-ok {
-            color: #10b981;
-        }
-
-        .status-warning {
-            color: #f59e0b;
-        }
-
-        .status-error {
-            color: #ef4444;
-        }
-
-        .button {
-            background: #2563eb;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-top: 10px;
-        }
-
-        .button:hover {
-            background: #1d4ed8;
-        }
-
-        .button-secondary {
-            background: #6b7280;
-        }
-
-        .button-secondary:hover {
-            background: #4b5563;
-        }
-
-        .alert {
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 10px;
-            font-size: 14px;
-        }
-
-        .alert-info {
-            background: #dbeafe;
-            color: #1e40af;
-        }
-
-        .alert-warning {
-            background: #fef3c7;
-            color: #92400e;
-        }
-
-        .alert-error {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #6b7280;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #e5e7eb;
-            border-top-color: #2563eb;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-        }
-    </style>
+    </script>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>📊 Immich Server Manager</h1>
-            <p class="subtitle">Monitoring, Backups, and Health Checks</p>
+<body class="bg-gray-100 dark:bg-immich-bg text-gray-900 dark:text-gray-100 min-h-screen p-5">
+    <div class="max-w-[1400px] mx-auto">
+        <header class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm p-5 mb-5 border border-gray-200 dark:border-immich-gray-800">
+            <h1 class="text-2xl font-bold text-immich-primary mb-1">📊 Immich Server Manager</h1>
+            <p class="text-sm text-gray-500 dark:text-immich-gray-400">Monitoring, Backups, and Health Checks</p>
         </header>
 
         <div id="content">
-            <div class="loading">
-                <div class="spinner"></div>
+            <div class="text-center py-10 text-gray-500 dark:text-immich-gray-400">
+                <svg class="animate-spin inline-block w-8 h-8 text-immich-primary mb-3" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
                 <p>Loading dashboard...</p>
             </div>
         </div>
@@ -202,7 +73,7 @@
                 const el = document.getElementById('content');
                 el.textContent = '';
                 const alertDiv = document.createElement('div');
-                alertDiv.className = 'alert alert-error';
+                alertDiv.className = 'px-4 py-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800';
                 alertDiv.textContent = 'Failed to load data. Please check your connection and authentication.';
                 el.appendChild(alertDiv);
             }
@@ -213,76 +84,76 @@
             const immichHealthy = status.immich_healthy;
 
             document.getElementById('content').innerHTML = `
-                <div class="grid">
-                    <div class="card">
-                        <h2>🖥️ System Status</h2>
-                        <div class="stat">
-                            <span class="stat-label">CPU Usage</span>
-                            <span class="stat-value ${Number(system.cpu_percent) > 80 ? 'status-warning' : 'status-ok'}">
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-5">
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">🖥️ System Status</h2>
+                        <div class="flex justify-between items-center py-2.5 border-b border-gray-50 dark:border-immich-gray-800">
+                            <span class="text-sm text-gray-500 dark:text-immich-gray-400">CPU Usage</span>
+                            <span class="font-semibold ${Number(system.cpu_percent) > 80 ? 'text-yellow-500' : 'text-green-500'}">
                                 ${Number(system.cpu_percent).toFixed(1)}%
                             </span>
                         </div>
-                        <div class="stat">
-                            <span class="stat-label">Memory Usage</span>
-                            <span class="stat-value ${Number(system.memory_percent) > 80 ? 'status-warning' : 'status-ok'}">
+                        <div class="flex justify-between items-center py-2.5 border-b border-gray-50 dark:border-immich-gray-800">
+                            <span class="text-sm text-gray-500 dark:text-immich-gray-400">Memory Usage</span>
+                            <span class="font-semibold ${Number(system.memory_percent) > 80 ? 'text-yellow-500' : 'text-green-500'}">
                                 ${Number(system.memory_percent).toFixed(1)}% (${Number(system.memory_used_gb).toFixed(1)} GB)
                             </span>
                         </div>
-                        <div class="stat">
-                            <span class="stat-label">Disk Usage</span>
-                            <span class="stat-value ${Number(system.disk_usage_percent) > 85 ? 'status-warning' : 'status-ok'}">
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-sm text-gray-500 dark:text-immich-gray-400">Disk Usage</span>
+                            <span class="font-semibold ${Number(system.disk_usage_percent) > 85 ? 'text-yellow-500' : 'text-green-500'}">
                                 ${Number(system.disk_usage_percent).toFixed(1)}% (${Number(system.disk_used_gb).toFixed(1)} GB)
                             </span>
                         </div>
                     </div>
 
-                    <div class="card">
-                        <h2>📷 Immich Status</h2>
-                        <div class="stat">
-                            <span class="stat-label">Service Health</span>
-                            <span class="stat-value ${immichHealthy ? 'status-ok' : 'status-error'}">
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">📷 Immich Status</h2>
+                        <div class="flex justify-between items-center py-2.5 border-b border-gray-50 dark:border-immich-gray-800">
+                            <span class="text-sm text-gray-500 dark:text-immich-gray-400">Service Health</span>
+                            <span class="font-semibold ${immichHealthy ? 'text-green-500' : 'text-red-500'}">
                                 ${immichHealthy ? '✓ Healthy' : '✗ Issues Detected'}
                             </span>
                         </div>
-                        <div class="stat">
-                            <span class="stat-label">Containers</span>
-                            <span class="stat-value">${Number(status.containers.length)} running</span>
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-sm text-gray-500 dark:text-immich-gray-400">Containers</span>
+                            <span class="font-semibold text-gray-900 dark:text-white">${Number(status.containers.length)} running</span>
                         </div>
                     </div>
 
-                    <div class="card">
-                        <h2>💾 Disk Health</h2>
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">💾 Disk Health</h2>
                         ${(disks.disks || []).map(disk => `
-                            <div class="stat">
-                                <span class="stat-label">${esc(disk.device)}</span>
-                                <span class="stat-value ${disk.smart_status ? 'status-ok' : 'status-error'}">
+                            <div class="flex justify-between items-center py-2.5 border-b border-gray-50 dark:border-immich-gray-800 last:border-0">
+                                <span class="text-sm text-gray-500 dark:text-immich-gray-400">${esc(disk.device)}</span>
+                                <span class="font-semibold ${disk.smart_status ? 'text-green-500' : 'text-red-500'}">
                                     ${disk.temperature ? Number(disk.temperature) + '°C' : 'N/A'}
                                 </span>
                             </div>
-                        `).join('') || '<p>No disk data available</p>'}
+                        `).join('') || '<p class="text-sm text-gray-500 dark:text-immich-gray-400">No disk data available</p>'}
                     </div>
 
-                    <div class="card">
-                        <h2>💿 Backups</h2>
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">💿 Backups</h2>
                         ${(backups.history || []).slice(0, 3).map(backup => `
-                            <div class="stat">
-                                <span class="stat-label">${esc(new Date(backup.timestamp).toLocaleDateString())}</span>
-                                <span class="stat-value ${backup.status === 'success' ? 'status-ok' : 'status-error'}">
+                            <div class="flex justify-between items-center py-2.5 border-b border-gray-50 dark:border-immich-gray-800 last:border-0">
+                                <span class="text-sm text-gray-500 dark:text-immich-gray-400">${esc(new Date(backup.timestamp).toLocaleDateString())}</span>
+                                <span class="font-semibold ${backup.status === 'success' ? 'text-green-500' : 'text-red-500'}">
                                     ${esc(backup.status)}
                                 </span>
                             </div>
-                        `).join('') || '<p>No backups yet</p>'}
-                        <button class="button" onclick="triggerBackup()">Backup Now</button>
+                        `).join('') || '<p class="text-sm text-gray-500 dark:text-immich-gray-400 mb-3">No backups yet</p>'}
+                        <button class="mt-3 px-5 py-2 bg-immich-primary hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer border-none" onclick="triggerBackup()">Backup Now</button>
                     </div>
                 </div>
 
                 ${(alerts.alerts || []).length > 0 ? `
-                    <div class="card">
-                        <h2>🔔 Recent Alerts</h2>
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">🔔 Recent Alerts</h2>
                         ${alerts.alerts.slice(0, 5).map(alert => `
-                            <div class="alert alert-${alert.severity === 'critical' ? 'error' : esc(alert.severity)}">
+                            <div class="px-3 py-3 rounded-lg mb-2.5 text-sm ${alert.severity === 'critical' ? 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200' : alert.severity === 'warning' ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200'}">
                                 <strong>${esc(alert.category)}:</strong> ${esc(alert.message)}
-                                <small style="display:block;margin-top:5px;opacity:0.7;">
+                                <small class="block mt-1 opacity-70">
                                     ${esc(new Date(alert.timestamp).toLocaleString())}
                                 </small>
                             </div>
