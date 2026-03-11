@@ -36,6 +36,8 @@ from .analyzer import PhotoAnalyzer
 from .auth import ImmichAuth, get_current_user, get_current_user_optional, get_user_api_client
 from .notifications import EmailNotifier
 from .logging_config import setup_json_logging
+from .batch_processor import BatchProcessor
+from .gpu_utils import GPUManager
 from shared.auth import (
     Role, ensure_users_table, require_role,
     get_all_users, update_user_role,
@@ -97,6 +99,8 @@ photo_cache: Optional[PhotoCache] = None
 analyzer: Optional[PhotoAnalyzer] = None
 scheduler: Optional[AsyncIOScheduler] = None
 email_notifier: Optional[EmailNotifier] = None
+batch_processor: Optional[BatchProcessor] = None
+gpu_manager: Optional[GPUManager] = None
 
 _ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
@@ -142,7 +146,7 @@ class EventAlbumCreate(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application"""
-    global config, database, admin_immich_client, photo_cache, analyzer, scheduler, email_notifier
+    global config, database, admin_immich_client, photo_cache, analyzer, scheduler, email_notifier, batch_processor, gpu_manager
 
     try:
         # Load configuration
@@ -193,8 +197,13 @@ async def startup_event():
         # Initialize photo cache
         photo_cache = PhotoCache()
 
-        # Initialize analyzer
-        analyzer = PhotoAnalyzer(config)
+        # Initialize GPU manager
+        gpu_config = config.get("batch_processing", {}).get("gpu", {"enabled": True, "device": "cuda:0"})
+        gpu_manager = GPUManager(gpu_config)
+        device = gpu_manager.init()
+
+        # Initialize analyzer (GPU-aware)
+        analyzer = PhotoAnalyzer(config, device=device)
 
         # Initialize email notifier
         # ADMIN TODO: Configure SMTP settings in config/config.yaml
@@ -236,6 +245,26 @@ async def startup_event():
 
         scheduler.add_job(_watchdog_heartbeat, "interval", seconds=30, id="watchdog")
 
+        # Initialize batch processor (requires admin client)
+        if admin_immich_client:
+            batch_config = config.get("batch_processing", {})
+            batch_processor = BatchProcessor(database, admin_immich_client, analyzer, batch_config)
+
+            # Schedule batch processing if enabled
+            if batch_config.get("schedule", {}).get("enabled", False):
+                scheduler.add_job(
+                    batch_processor.run_scheduled,
+                    'cron',
+                    minute='*/5',
+                    id='batch_scheduled',
+                    replace_existing=True
+                )
+                logger.info("Batch processing scheduler enabled (checking every 5 min)")
+            else:
+                logger.info("Batch processing scheduler disabled (enable in config.yaml)")
+        else:
+            logger.warning("⚠ Batch processing disabled (no admin API key configured)")
+
         scheduler.start()
         logger.info(f"Scheduler started (monthly reminders at {reminder_time})")
 
@@ -257,6 +286,8 @@ async def shutdown_event():
     """Cleanup on shutdown"""
     if scheduler:
         scheduler.shutdown()
+    if batch_processor:
+        await batch_processor.cancel_job()
 
 
 # Background job for monthly reminders
@@ -2373,6 +2404,171 @@ async def create_album_from_event(
     except Exception as e:
         logger.error(f"Failed to create album from event {event_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/processing", response_class=HTMLResponse)
+async def processing_page(request: Request, user: Dict = Depends(require_user_page)):
+    """Serve batch processing UI (requires User role)."""
+    html_path = Path(__file__).parent.parent / "static" / "processing.html"
+    if html_path.exists():
+        return html_path.read_text()
+    return HTMLResponse("<h1>Processing page not found</h1>", status_code=404)
+
+
+# =============================================================================
+# Batch Processing API
+# =============================================================================
+
+class BatchStartRequest(BaseModel):
+    mode: str = "incremental"  # incremental | missing_vectors | full | retry_errors
+    user_id: Optional[str] = None
+
+
+class BatchConfigSave(BaseModel):
+    batch_size: Optional[int] = None
+    delay_between_batches: Optional[int] = None
+    max_cpu_percent: Optional[int] = None
+    schedule_enabled: Optional[bool] = None
+    time_window_start: Optional[str] = None
+    time_window_end: Optional[str] = None
+    default_mode: Optional[str] = None
+
+
+@app.get("/api/batch/status")
+@limiter.limit("60/minute")
+async def batch_status(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Get current batch job status + last 20 log entries."""
+    if not batch_processor:
+        raise HTTPException(503, "Batch processor not available (admin API key required)")
+    return await batch_processor.get_status()
+
+
+@app.post("/api/batch/start")
+@limiter.limit("5/minute")
+async def batch_start(
+    request: Request,
+    body: BatchStartRequest,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Start a batch processing job."""
+    if not batch_processor:
+        raise HTTPException(503, "Batch processor not available (admin API key required)")
+    valid_modes = {"incremental", "missing_vectors", "full", "retry_errors"}
+    if body.mode not in valid_modes:
+        raise HTTPException(400, f"Invalid mode. Must be one of: {', '.join(valid_modes)}")
+    try:
+        job_id = await batch_processor.start_job(mode=body.mode, user_id=body.user_id)
+        return {"job_id": job_id, "mode": body.mode, "message": "Batch job started"}
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.post("/api/batch/cancel")
+@limiter.limit("10/minute")
+async def batch_cancel(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Cancel the current running batch job."""
+    if not batch_processor:
+        raise HTTPException(503, "Batch processor not available (admin API key required)")
+    cancelled = await batch_processor.cancel_job()
+    if cancelled:
+        return {"message": "Batch job cancelled"}
+    return {"message": "No running job to cancel"}
+
+
+@app.get("/api/batch/history")
+@limiter.limit("30/minute")
+async def batch_history(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Return the last 10 completed/failed/cancelled batch jobs."""
+    if not batch_processor:
+        raise HTTPException(503, "Batch processor not available (admin API key required)")
+    return await batch_processor.get_history(limit=10)
+
+
+@app.get("/api/batch/errors/{job_id}")
+@limiter.limit("30/minute")
+async def batch_errors(
+    request: Request,
+    job_id: str,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Return all per-photo errors for a specific job."""
+    if not batch_processor:
+        raise HTTPException(503, "Batch processor not available (admin API key required)")
+    errors = await batch_processor.get_errors(job_id)
+    return {"job_id": job_id, "errors": errors, "count": len(errors)}
+
+
+@app.post("/api/batch/config")
+@limiter.limit("10/minute")
+async def batch_config_save(
+    request: Request,
+    body: BatchConfigSave,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Save batch processing config to config.yaml."""
+    config_path = Path("config/config.yaml")
+    if not config_path.exists():
+        raise HTTPException(404, "config/config.yaml not found")
+
+    with open(config_path) as f:
+        current_config = yaml.safe_load(f)
+
+    # Update nested config values
+    bp = current_config.setdefault("batch_processing", {})
+    cadence = bp.setdefault("cadence", {})
+    schedule = bp.setdefault("schedule", {})
+
+    if body.batch_size is not None:
+        cadence["batch_size"] = body.batch_size
+    if body.delay_between_batches is not None:
+        cadence["delay_between_batches"] = body.delay_between_batches
+    if body.max_cpu_percent is not None:
+        cadence["max_cpu_percent"] = body.max_cpu_percent
+    if body.schedule_enabled is not None:
+        schedule["enabled"] = body.schedule_enabled
+    if body.time_window_start is not None:
+        schedule["time_window_start"] = body.time_window_start
+    if body.time_window_end is not None:
+        schedule["time_window_end"] = body.time_window_end
+    if body.default_mode is not None:
+        bp["default_mode"] = body.default_mode
+
+    with open(config_path, "w") as f:
+        yaml.dump(current_config, f, default_flow_style=False, allow_unicode=True)
+
+    # Update live config in batch_processor
+    if batch_processor:
+        batch_processor._config = bp
+
+    return {"message": "Config saved. Cadence settings take effect immediately. GPU/worker settings require restart."}
+
+
+@app.get("/api/batch/gpu-status")
+@limiter.limit("30/minute")
+async def batch_gpu_status(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.ADMIN)),
+):
+    """Return GPU detection status and VRAM info."""
+    if not gpu_manager:
+        return {"cuda_available": False, "device_name": "CPU", "initialized": False}
+    return gpu_manager.get_status()
 
 
 def main():
