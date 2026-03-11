@@ -47,11 +47,11 @@ sudo tee /etc/fail2ban/jail.d/immich.conf > /dev/null <<'EOF'
 [DEFAULT]
 bantime = 3600
 findtime = 600
-maxretry = 5
 
 [sshd]
 enabled = true
-port = ssh
+port = 2222
+maxretry = 5
 logpath = %(sshd_log)s
 backend = %(sshd_backend)s
 EOF
@@ -75,8 +75,8 @@ if ! sudo ufw status | grep -q "Status: active"; then
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
 
-    # Allow SSH (important!)
-    sudo ufw allow ssh
+    # Allow SSH on non-standard port (important!)
+    sudo ufw allow 2222/tcp
 
     # Allow local network
     LOCAL_SUBNET=$(ip route | grep default | awk '{print $3}' | cut -d. -f1-3).0/24
