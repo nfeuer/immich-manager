@@ -109,6 +109,10 @@ class BatchProcessor:
         if not self._current_job_id:
             return False
 
+        # Writing 'cancelled' to the DB is the primary cancellation signal.
+        # The batch loop checks this flag at the start of each iteration and
+        # exits cleanly.  task.cancel() is a secondary failsafe for tasks
+        # suspended inside asyncio.sleep() between batches.
         await asyncio.to_thread(
             self._set_job_status, self._current_job_id, "cancelled",
             "Cancelled by user request"
@@ -429,7 +433,7 @@ class BatchProcessor:
                 error_ids = {row[0] for row in cursor.fetchall()}
                 return [p for p in all_photos if p.get("id") in error_ids]
 
-        return all_photos
+        raise ValueError(f"Unknown mode: {mode}")
 
     # =========================================================================
     # Internal: time window
