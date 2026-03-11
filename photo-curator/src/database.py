@@ -181,6 +181,50 @@ MIGRATIONS: List[tuple] = [
     (7, "add participants column to event_suggestions", [
         "ALTER TABLE event_suggestions ADD COLUMN participants TEXT",
     ]),
+    # Version 8: batch photo processing tables
+    (8, "add batch processing tables", [
+        """CREATE TABLE IF NOT EXISTS batch_jobs (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            mode TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            total_photos INTEGER DEFAULT 0,
+            processed_photos INTEGER DEFAULT 0,
+            successful_photos INTEGER DEFAULT 0,
+            failed_photos INTEGER DEFAULT 0,
+            current_batch INTEGER DEFAULT 0,
+            total_batches INTEGER DEFAULT 0,
+            consecutive_failures INTEGER DEFAULT 0,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME,
+            error_message TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_batch_jobs_status ON batch_jobs(status)",
+        "CREATE INDEX IF NOT EXISTS idx_batch_jobs_user ON batch_jobs(user_id)",
+        """CREATE TABLE IF NOT EXISTS batch_job_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL,
+            batch_number INTEGER DEFAULT 0,
+            message TEXT NOT NULL,
+            level TEXT NOT NULL DEFAULT 'info',
+            logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (job_id) REFERENCES batch_jobs(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_batch_logs_job ON batch_job_logs(job_id)",
+        """CREATE TABLE IF NOT EXISTS batch_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL,
+            batch_number INTEGER DEFAULT 0,
+            asset_id TEXT NOT NULL,
+            error_type TEXT NOT NULL,
+            error_message TEXT NOT NULL,
+            occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (job_id) REFERENCES batch_jobs(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_batch_errors_job ON batch_errors(job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_batch_errors_asset ON batch_errors(asset_id)",
+    ]),
 ]
 
 
