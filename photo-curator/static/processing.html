@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Processing - Immich</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'immich-primary': '#4250af',
+                        'immich-bg': '#000000',
+                        'immich-gray': {
+                            50: '#f9fafb',
+                            100: '#f3f4f6',
+                            200: '#e5e7eb',
+                            300: '#d1d5db',
+                            400: '#9ca3af',
+                            500: '#6b7280',
+                            600: '#4b5563',
+                            700: '#374151',
+                            800: '#1f2937',
+                            900: '#111827',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-black dark:bg-immich-bg text-gray-900 dark:text-gray-100 min-h-screen">
+    <div class="max-w-[1920px] mx-auto">
+
+        <!-- Header -->
+        <header class="bg-white dark:bg-immich-gray-900 border-b border-gray-200 dark:border-immich-gray-800">
+            <div class="px-4 sm:px-6 lg:px-8 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <!-- Gear/Processing icon -->
+                        <svg class="w-8 h-8 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+                        </svg>
+                        <div>
+                            <h1 class="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">Batch Processing</h1>
+                            <p class="text-sm text-gray-500 dark:text-immich-gray-400 hidden sm:block">Throttled photo analysis with GPU acceleration</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="text-sm text-immich-primary hover:underline flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+                            </svg>
+                            <span class="hidden sm:inline">Back to Curator</span>
+                        </a>
+                        <div class="text-right hidden sm:block">
+                            <p class="text-xs text-gray-500 dark:text-immich-gray-400">Logged in as</p>
+                            <p class="text-sm font-medium text-gray-900 dark:text-white" id="userName">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main content -->
+        <div class="px-4 sm:px-6 lg:px-8 py-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                <!-- LEFT COLUMN: Settings -->
+                <div class="lg:col-span-1 space-y-6">
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <svg class="w-4 h-4 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/>
+                            </svg>
+                            Settings
+                        </h2>
+
+                        <!-- Processing Mode -->
+                        <div class="mb-5">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-immich-gray-300 mb-2">Processing Mode</label>
+                            <div class="space-y-2">
+                                <label class="flex items-start gap-3 p-2.5 rounded-lg border border-gray-200 dark:border-immich-gray-800 hover:border-immich-primary dark:hover:border-immich-primary cursor-pointer transition-all has-[:checked]:border-immich-primary has-[:checked]:bg-indigo-50 dark:has-[:checked]:bg-immich-primary/10">
+                                    <input type="radio" name="processingMode" value="incremental" class="mt-0.5 accent-immich-primary" checked>
+                                    <div>
+                                        <span class="text-sm font-medium text-gray-900 dark:text-white block">Incremental</span>
+                                        <span class="text-xs text-gray-500 dark:text-immich-gray-400">Only unscored photos</span>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-3 p-2.5 rounded-lg border border-gray-200 dark:border-immich-gray-800 hover:border-immich-primary dark:hover:border-immich-primary cursor-pointer transition-all has-[:checked]:border-immich-primary has-[:checked]:bg-indigo-50 dark:has-[:checked]:bg-immich-primary/10">
+                                    <input type="radio" name="processingMode" value="missing_vectors" class="mt-0.5 accent-immich-primary">
+                                    <div>
+                                        <span class="text-sm font-medium text-gray-900 dark:text-white block">Missing Vectors</span>
+                                        <span class="text-xs text-gray-500 dark:text-immich-gray-400">Photos with missing score fields</span>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-3 p-2.5 rounded-lg border border-gray-200 dark:border-immich-gray-800 hover:border-immich-primary dark:hover:border-immich-primary cursor-pointer transition-all has-[:checked]:border-immich-primary has-[:checked]:bg-indigo-50 dark:has-[:checked]:bg-immich-primary/10">
+                                    <input type="radio" name="processingMode" value="full" class="mt-0.5 accent-immich-primary">
+                                    <div>
+                                        <span class="text-sm font-medium text-gray-900 dark:text-white block">Full Re-analyze</span>
+                                        <span class="text-xs text-gray-500 dark:text-immich-gray-400">Re-analyze all photos</span>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-3 p-2.5 rounded-lg border border-gray-200 dark:border-immich-gray-800 hover:border-immich-primary dark:hover:border-immich-primary cursor-pointer transition-all has-[:checked]:border-immich-primary has-[:checked]:bg-indigo-50 dark:has-[:checked]:bg-immich-primary/10">
+                                    <input type="radio" name="processingMode" value="retry_errors" class="mt-0.5 accent-immich-primary">
+                                    <div>
+                                        <span class="text-sm font-medium text-gray-900 dark:text-white block">Retry Errors</span>
+                                        <span class="text-xs text-gray-500 dark:text-immich-gray-400">Retry previously failed photos</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Cadence Controls -->
+                        <div class="mb-5">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-immich-gray-300 mb-2">Cadence Controls</label>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-xs text-gray-500 dark:text-immich-gray-400 mb-1">Batch Size (photos per batch)</label>
+                                    <input type="number" id="batchSize" min="1" max="500" value="50"
+                                        class="w-full px-3 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none transition-all">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 dark:text-immich-gray-400 mb-1">Delay Between Batches (seconds)</label>
+                                    <input type="number" id="delayBetweenBatches" min="0" max="3600" value="2"
+                                        class="w-full px-3 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none transition-all">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 dark:text-immich-gray-400 mb-1">Max CPU % (pause threshold)</label>
+                                    <input type="number" id="maxCpuPercent" min="10" max="100" value="80"
+                                        class="w-full px-3 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none transition-all">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Schedule -->
+                        <div class="mb-5">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-immich-gray-300 mb-2">Schedule</label>
+                            <div class="space-y-3">
+                                <label class="flex items-center gap-3 cursor-pointer">
+                                    <div class="relative">
+                                        <input type="checkbox" id="scheduleEnabled" class="sr-only peer" onchange="toggleSchedule()">
+                                        <div class="w-10 h-5 bg-gray-300 dark:bg-immich-gray-700 peer-checked:bg-immich-primary rounded-full transition-colors"></div>
+                                        <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-sm"></div>
+                                    </div>
+                                    <span class="text-sm text-gray-700 dark:text-immich-gray-300">Enable scheduled runs</span>
+                                </label>
+                                <div id="scheduleWindows" class="hidden space-y-3 pl-1">
+                                    <div>
+                                        <label class="block text-xs text-gray-500 dark:text-immich-gray-400 mb-1">Start Window (HH:MM)</label>
+                                        <input type="time" id="timeWindowStart" value="02:00"
+                                            class="w-full px-3 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none transition-all">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-gray-500 dark:text-immich-gray-400 mb-1">End Window (HH:MM)</label>
+                                        <input type="time" id="timeWindowEnd" value="06:00"
+                                            class="w-full px-3 py-2 bg-white dark:bg-immich-gray-800 border border-gray-300 dark:border-immich-gray-700 rounded-lg text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-immich-primary focus:border-transparent outline-none transition-all">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Action buttons -->
+                        <div class="flex gap-3">
+                            <button onclick="saveSettings()"
+                                class="flex-1 px-4 py-2 border border-gray-300 dark:border-immich-gray-700 text-gray-700 dark:text-immich-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-immich-gray-800 transition-all text-sm font-medium flex items-center justify-center gap-2">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+                                </svg>
+                                Save Settings
+                            </button>
+                            <button id="startCancelBtn" onclick="toggleJob()"
+                                class="flex-1 px-4 py-2 bg-immich-primary text-white rounded-lg hover:bg-opacity-90 transition-all text-sm font-medium flex items-center justify-center gap-2">
+                                <svg id="startCancelIcon" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path id="startCancelIconPath" d="M8 5v14l11-7z"/>
+                                </svg>
+                                <span id="startCancelText">Start Now</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN: Progress + Log -->
+                <div class="lg:col-span-2 space-y-6">
+
+                    <!-- Progress card -->
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-4 h-4 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6-4.72 7.72L13 17v5h5l-1.22-1.22C19.91 19.07 22 15.76 22 12c0-5.18-3.95-9.45-9-9.95zM11 2.05C5.95 2.55 2 6.82 2 12c0 3.76 2.09 7.07 5.22 8.78L6 22h5V2.05z"/>
+                                </svg>
+                                Progress
+                            </h2>
+                            <div class="flex items-center gap-2">
+                                <span id="gpuBadge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-immich-gray-800 text-gray-500 dark:text-immich-gray-400">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-immich-gray-500"></span>
+                                    <span id="gpuBadgeText">Detecting...</span>
+                                </span>
+                                <span id="statusBadge" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-immich-gray-800 text-gray-500 dark:text-immich-gray-400">
+                                    Idle
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Progress bar -->
+                        <div class="mb-3">
+                            <div class="flex justify-between text-xs text-gray-500 dark:text-immich-gray-400 mb-1.5">
+                                <span id="progressLabel">0 / 0 photos</span>
+                                <span id="progressPct">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-immich-gray-800 rounded-full h-2.5 overflow-hidden">
+                                <div id="progressBar" class="h-2.5 rounded-full bg-immich-primary transition-all duration-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Stats row -->
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+                            <div class="text-center p-2.5 bg-gray-50 dark:bg-immich-gray-800 rounded-lg">
+                                <p class="text-xs text-gray-500 dark:text-immich-gray-400 mb-0.5">Batch</p>
+                                <p class="text-sm font-semibold text-gray-900 dark:text-white" id="statBatch">-- / --</p>
+                            </div>
+                            <div class="text-center p-2.5 bg-gray-50 dark:bg-immich-gray-800 rounded-lg">
+                                <p class="text-xs text-gray-500 dark:text-immich-gray-400 mb-0.5">Rate</p>
+                                <p class="text-sm font-semibold text-gray-900 dark:text-white" id="statRate">-- /sec</p>
+                            </div>
+                            <div class="text-center p-2.5 bg-gray-50 dark:bg-immich-gray-800 rounded-lg">
+                                <p class="text-xs text-gray-500 dark:text-immich-gray-400 mb-0.5">ETA</p>
+                                <p class="text-sm font-semibold text-gray-900 dark:text-white" id="statEta">--</p>
+                            </div>
+                            <div class="text-center p-2.5 bg-gray-50 dark:bg-immich-gray-800 rounded-lg">
+                                <p class="text-xs text-gray-500 dark:text-immich-gray-400 mb-0.5">Failed</p>
+                                <p class="text-sm font-semibold text-gray-900 dark:text-white" id="statFailed">0</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Log panel -->
+                    <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-5">
+                        <div class="flex items-center justify-between mb-3">
+                            <h2 class="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-4 h-4 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.89 2-2V5c0-1.11-.89-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/>
+                                </svg>
+                                Live Log
+                            </h2>
+                            <a id="viewErrorsLink" href="#" onclick="openErrorModal(); return false;"
+                                class="hidden text-xs text-red-500 hover:text-red-400 font-medium flex items-center gap-1 transition-colors">
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                                </svg>
+                                View Errors
+                            </a>
+                        </div>
+                        <div id="logArea"
+                            class="max-h-52 overflow-y-auto space-y-1 font-mono text-xs bg-gray-50 dark:bg-immich-gray-800 rounded-lg p-3 border border-gray-200 dark:border-immich-gray-700">
+                            <p class="text-gray-400 dark:text-immich-gray-500 italic">No log entries yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History panel -->
+            <div class="mt-6 bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm dark:shadow-none border border-gray-200 dark:border-immich-gray-800 p-5">
+                <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-immich-primary" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/>
+                    </svg>
+                    Recent Jobs
+                </h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b border-gray-200 dark:border-immich-gray-800">
+                                <th class="text-left py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Date</th>
+                                <th class="text-left py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Mode</th>
+                                <th class="text-left py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Status</th>
+                                <th class="text-right py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Scored</th>
+                                <th class="text-right py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Failed</th>
+                                <th class="text-right py-2 text-xs font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyBody">
+                            <tr>
+                                <td colspan="6" class="py-6 text-center text-gray-400 dark:text-immich-gray-500 text-sm italic">Loading history...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="errorModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeErrorModal()"></div>
+        <div class="relative z-10 flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white dark:bg-immich-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-immich-gray-700 w-full max-w-3xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                        </svg>
+                        Failed Photos
+                    </h2>
+                    <button onclick="closeErrorModal()" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-immich-gray-300 hover:bg-gray-100 dark:hover:bg-immich-gray-800 transition-all">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table class="w-full text-xs">
+                        <thead class="sticky top-0 bg-white dark:bg-immich-gray-900">
+                            <tr class="border-b border-gray-200 dark:border-immich-gray-800">
+                                <th class="text-left py-2 pr-3 font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Asset ID</th>
+                                <th class="text-left py-2 pr-3 font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Batch #</th>
+                                <th class="text-left py-2 pr-3 font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Error Type</th>
+                                <th class="text-left py-2 pr-3 font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Message</th>
+                                <th class="text-left py-2 font-semibold text-gray-500 dark:text-immich-gray-400 uppercase tracking-wide">Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="errorTableBody">
+                            <tr>
+                                <td colspan="5" class="py-6 text-center text-gray-400 dark:text-immich-gray-500 italic">Loading errors...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button onclick="closeErrorModal()"
+                        class="px-5 py-2 rounded-lg border border-gray-300 dark:border-immich-gray-700 text-gray-700 dark:text-immich-gray-300 hover:bg-gray-50 dark:hover:bg-immich-gray-800 transition-all text-sm font-medium">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 z-50 hidden max-w-sm">
+        <div id="toastContent" class="flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium"></div>
+    </div>
+
+    <script>
+        // ── State ────────────────────────────────────────────────────────────
+        let pollTimer = null;
+        let currentJobId = null;
+        let currentStatus = 'idle';
+        let rateTracker = { time: null, processed: 0 };
+        let toastTimer = null;
+
+        // ── Status config ─────────────────────────────────────────────────────
+        const STATUS_CONFIG = {
+            idle:         { label: 'Idle',          badgeCls: 'bg-gray-100 dark:bg-immich-gray-800 text-gray-500 dark:text-immich-gray-400',           barCls: 'bg-gray-400 dark:bg-immich-gray-500' },
+            running:      { label: 'Running',        badgeCls: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',                   barCls: 'bg-immich-primary' },
+            paused_error: { label: 'Paused (Error)', badgeCls: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',                           barCls: 'bg-red-500' },
+            completed:    { label: 'Completed',      badgeCls: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',                       barCls: 'bg-blue-500' },
+            cancelled:    { label: 'Cancelled',      badgeCls: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',               barCls: 'bg-orange-400' },
+            failed:       { label: 'Failed',         badgeCls: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',                           barCls: 'bg-red-500' },
+        };
+
+        const TERMINAL_STATUSES = new Set(['completed', 'paused_error', 'cancelled', 'failed', 'idle']);
+
+        const MODE_LABELS = {
+            incremental:     'Incremental',
+            missing_vectors: 'Missing Vectors',
+            full:            'Full',
+            retry_errors:    'Retry Errors',
+        };
+
+        const LOG_LEVEL_CLS = {
+            info:    'text-gray-300 dark:text-immich-gray-300',
+            warning: 'text-yellow-500 dark:text-yellow-400',
+            error:   'text-red-500 dark:text-red-400',
+            debug:   'text-gray-400 dark:text-immich-gray-500',
+        };
+
+        // ── Init ─────────────────────────────────────────────────────────────
+        async function init() {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'light') document.documentElement.classList.remove('dark');
+            else document.documentElement.classList.add('dark');
+
+            try {
+                const r = await fetch('/api/auth/check');
+                if (!r.ok) { window.location.href = '/'; return; }
+                const data = await r.json();
+                document.getElementById('userName').textContent =
+                    data.user?.name || data.user?.email || 'User';
+            } catch { window.location.href = '/'; return; }
+
+            await Promise.all([loadGpuStatus(), loadStatus(), loadHistory()]);
+        }
+
+        // ── GPU Status ────────────────────────────────────────────────────────
+        async function loadGpuStatus() {
+            const badge = document.getElementById('gpuBadge');
+            const dot   = badge.querySelector('span');
+            const txt   = document.getElementById('gpuBadgeText');
+            try {
+                const r = await fetch('/api/batch/gpu-status');
+                if (!r.ok) throw new Error();
+                const data = await r.json();
+                if (data.cuda_available) {
+                    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
+                    dot.className   = 'w-1.5 h-1.5 rounded-full bg-green-500';
+                    txt.textContent = 'CUDA (' + (data.device_name || 'GPU') + ')';
+                } else {
+                    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-immich-gray-800 text-gray-500 dark:text-immich-gray-400';
+                    dot.className   = 'w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-immich-gray-500';
+                    txt.textContent = 'CPU only';
+                }
+            } catch {
+                txt.textContent = 'CPU only';
+            }
+        }
+
+        // ── Status polling ────────────────────────────────────────────────────
+        async function loadStatus() {
+            try {
+                const r = await fetch('/api/batch/status');
+                if (!r.ok) return;
+                applyStatus(await r.json());
+            } catch (e) {
+                console.error('Status fetch failed:', e);
+            }
+        }
+
+        function applyStatus(data) {
+            const status = data.status || 'idle';
+            const job    = data.job   || {};
+            const logs   = data.logs  || [];
+
+            currentStatus = status;
+            currentJobId  = job.id || null;
+
+            // Status badge
+            const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.idle;
+            const badge = document.getElementById('statusBadge');
+            badge.className   = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ' + cfg.badgeCls;
+            badge.textContent = cfg.label;
+
+            // Progress bar
+            const total     = job.total_photos     || 0;
+            const processed = job.processed_photos || 0;
+            const pct       = total > 0 ? Math.round((processed / total) * 100) : 0;
+            const bar       = document.getElementById('progressBar');
+            bar.className   = 'h-2.5 rounded-full transition-all duration-500 ' + cfg.barCls;
+            bar.style.width = pct + '%';
+            document.getElementById('progressPct').textContent   = pct + '%';
+            document.getElementById('progressLabel').textContent =
+                processed.toLocaleString() + ' / ' + total.toLocaleString() + ' photos';
+
+            // Batch stat
+            const curBatch   = job.current_batch || 0;
+            const totalBatch = job.total_batches  || 0;
+            document.getElementById('statBatch').textContent =
+                total > 0 ? curBatch + ' / ' + totalBatch : '-- / --';
+
+            // Rate + ETA
+            if (status === 'running' && processed > 0) {
+                const now = Date.now();
+                if (rateTracker.time && processed > rateTracker.processed) {
+                    const elapsed = (now - rateTracker.time) / 1000;
+                    const delta   = processed - rateTracker.processed;
+                    const rate    = delta / elapsed;
+                    document.getElementById('statRate').textContent = rate.toFixed(1) + '/sec';
+                    const remaining = total - processed;
+                    document.getElementById('statEta').textContent =
+                        (rate > 0 && remaining > 0) ? formatEta(remaining / rate) : '--';
+                }
+                rateTracker = { time: Date.now(), processed };
+            } else if (TERMINAL_STATUSES.has(status)) {
+                document.getElementById('statRate').textContent = '-- /sec';
+                document.getElementById('statEta').textContent  = status === 'completed' ? 'Done' : '--';
+                if (status !== 'running') rateTracker = { time: null, processed: 0 };
+            }
+
+            // Failed count
+            const failedCount = job.failed_photos || 0;
+            document.getElementById('statFailed').textContent = failedCount.toLocaleString();
+            const errLink = document.getElementById('viewErrorsLink');
+            if (failedCount > 0 && currentJobId) errLink.classList.remove('hidden');
+            else errLink.classList.add('hidden');
+
+            // Logs
+            renderLogs(logs);
+
+            // Button state
+            updateJobButton(status);
+
+            // Polling
+            if (status === 'running') schedulePoll();
+            else {
+                stopPolling();
+                if (status === 'completed' || status === 'cancelled') loadHistory();
+            }
+        }
+
+        function schedulePoll() {
+            stopPolling();
+            pollTimer = setTimeout(loadStatus, 3000);
+        }
+
+        function stopPolling() {
+            if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+        }
+
+        // ── Log rendering (DOM-based, no innerHTML with data) ─────────────────
+        function renderLogs(logs) {
+            const area = document.getElementById('logArea');
+            area.textContent = ''; // clear safely
+
+            if (!logs || logs.length === 0) {
+                const p = document.createElement('p');
+                p.className   = 'text-gray-400 dark:text-immich-gray-500 italic';
+                p.textContent = 'No log entries yet.';
+                area.appendChild(p);
+                return;
+            }
+
+            logs.forEach(entry => {
+                const row   = document.createElement('div');
+                row.className = 'flex gap-2 leading-relaxed';
+
+                const ts = document.createElement('span');
+                ts.className   = 'text-gray-400 dark:text-immich-gray-600 flex-shrink-0';
+                ts.textContent = entry.timestamp ? formatTimestamp(entry.timestamp) : '';
+
+                const level     = (entry.level || 'info').toLowerCase();
+                const lvlSpan   = document.createElement('span');
+                lvlSpan.className   = 'text-immich-gray-500 dark:text-immich-gray-500 uppercase flex-shrink-0 w-14';
+                lvlSpan.textContent = '[' + level + ']';
+
+                const msg = document.createElement('span');
+                msg.className   = LOG_LEVEL_CLS[level] || LOG_LEVEL_CLS.info;
+                msg.textContent = entry.message || '';
+
+                row.appendChild(ts);
+                row.appendChild(lvlSpan);
+                row.appendChild(msg);
+                area.appendChild(row);
+            });
+
+            area.scrollTop = area.scrollHeight;
+        }
+
+        function formatTimestamp(ts) {
+            try {
+                return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            } catch { return String(ts); }
+        }
+
+        // ── Start / Cancel ────────────────────────────────────────────────────
+        function updateJobButton(status) {
+            const btn      = document.getElementById('startCancelBtn');
+            const iconPath = document.getElementById('startCancelIconPath');
+            const txt      = document.getElementById('startCancelText');
+
+            if (status === 'running') {
+                btn.className      = 'flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-opacity-90 transition-all text-sm font-medium flex items-center justify-center gap-2';
+                iconPath.setAttribute('d', 'M6 6h12v12H6z');
+                txt.textContent    = 'Cancel';
+            } else {
+                btn.className      = 'flex-1 px-4 py-2 bg-immich-primary text-white rounded-lg hover:bg-opacity-90 transition-all text-sm font-medium flex items-center justify-center gap-2';
+                iconPath.setAttribute('d', 'M8 5v14l11-7z');
+                txt.textContent    = 'Start Now';
+            }
+        }
+
+        async function toggleJob() {
+            if (currentStatus === 'running') await cancelJob();
+            else await startJob();
+        }
+
+        async function startJob() {
+            const mode = document.querySelector('input[name="processingMode"]:checked')?.value || 'incremental';
+            const btn  = document.getElementById('startCancelBtn');
+            btn.disabled = true;
+            try {
+                const r = await fetch('/api/batch/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode, user_id: null }),
+                });
+                if (!r.ok) throw new Error(await r.text());
+                rateTracker = { time: Date.now(), processed: 0 };
+                showToast('Batch job started', 'success');
+                await loadStatus();
+            } catch (e) {
+                showToast('Failed to start: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function cancelJob() {
+            const btn = document.getElementById('startCancelBtn');
+            btn.disabled = true;
+            try {
+                const r = await fetch('/api/batch/cancel', { method: 'POST' });
+                if (!r.ok) throw new Error(await r.text());
+                showToast('Cancellation requested', 'info');
+                stopPolling();
+                await loadStatus();
+            } catch (e) {
+                showToast('Failed to cancel: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Save Settings ─────────────────────────────────────────────────────
+        async function saveSettings() {
+            const mode = document.querySelector('input[name="processingMode"]:checked')?.value || 'incremental';
+            const payload = {
+                batch_size:             parseInt(document.getElementById('batchSize').value)            || 50,
+                delay_between_batches:  parseFloat(document.getElementById('delayBetweenBatches').value) || 2,
+                max_cpu_percent:        parseInt(document.getElementById('maxCpuPercent').value)         || 80,
+                schedule_enabled:       document.getElementById('scheduleEnabled').checked,
+                time_window_start:      document.getElementById('timeWindowStart').value,
+                time_window_end:        document.getElementById('timeWindowEnd').value,
+                default_mode:           mode,
+            };
+            try {
+                const r = await fetch('/api/batch/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!r.ok) throw new Error(await r.text());
+                showToast('Settings saved', 'success');
+            } catch (e) {
+                showToast('Failed to save: ' + e.message, 'error');
+            }
+        }
+
+        // ── Schedule toggle ───────────────────────────────────────────────────
+        function toggleSchedule() {
+            const enabled = document.getElementById('scheduleEnabled').checked;
+            const win     = document.getElementById('scheduleWindows');
+            if (enabled) win.classList.remove('hidden');
+            else win.classList.add('hidden');
+        }
+
+        // ── History (DOM-based table rows) ────────────────────────────────────
+        async function loadHistory() {
+            try {
+                const r = await fetch('/api/batch/history');
+                if (!r.ok) return;
+                const data = await r.json();
+                renderHistory(data.jobs || data || []);
+            } catch {
+                const tbody = document.getElementById('historyBody');
+                tbody.textContent = '';
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan   = 6;
+                td.className = 'py-6 text-center text-gray-400 dark:text-immich-gray-500 italic text-sm';
+                td.textContent = 'Unable to load history.';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+            }
+        }
+
+        function renderHistory(jobs) {
+            const tbody = document.getElementById('historyBody');
+            tbody.textContent = '';
+
+            if (!jobs || jobs.length === 0) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan   = 6;
+                td.className = 'py-6 text-center text-gray-400 dark:text-immich-gray-500 italic text-sm';
+                td.textContent = 'No completed jobs yet.';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+                return;
+            }
+
+            jobs.slice(0, 10).forEach(job => {
+                const cfg    = STATUS_CONFIG[job.status] || STATUS_CONFIG.idle;
+                const scored = job.successful_photos ?? job.scored ?? 0;
+                const failed = job.failed_photos ?? job.failed ?? 0;
+
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-gray-100 dark:border-immich-gray-800 hover:bg-gray-50 dark:hover:bg-immich-gray-800/50 transition-colors';
+
+                function td(text, cls) {
+                    const el = document.createElement('td');
+                    el.className   = 'py-2.5 pr-4 ' + (cls || 'text-gray-600 dark:text-immich-gray-400');
+                    el.textContent = text;
+                    return el;
+                }
+
+                // Date
+                tr.appendChild(td(formatDate(job.started_at)));
+
+                // Mode
+                tr.appendChild(td(MODE_LABELS[job.mode] || job.mode || '--', 'py-2.5 pr-4 text-gray-700 dark:text-immich-gray-300'));
+
+                // Status badge cell
+                const statusTd = document.createElement('td');
+                statusTd.className = 'py-2.5 pr-4';
+                const pill = document.createElement('span');
+                pill.className   = 'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ' + cfg.badgeCls;
+                pill.textContent = cfg.label;
+                statusTd.appendChild(pill);
+                tr.appendChild(statusTd);
+
+                // Scored (right-aligned)
+                const scoredTd = td(scored.toLocaleString(), 'py-2.5 pr-4 text-right text-gray-700 dark:text-immich-gray-300');
+                tr.appendChild(scoredTd);
+
+                // Failed (right-aligned, red when > 0)
+                const failedCls = failed > 0 ? 'py-2.5 pr-4 text-right text-red-500' : 'py-2.5 pr-4 text-right text-gray-500 dark:text-immich-gray-400';
+                tr.appendChild(td(failed.toLocaleString(), failedCls));
+
+                // Duration (right-aligned)
+                const durTd = td(formatDuration(job.started_at, job.completed_at), 'py-2.5 text-right text-gray-500 dark:text-immich-gray-400');
+                tr.appendChild(durTd);
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        function formatDate(ts) {
+            if (!ts) return '--';
+            try {
+                return new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            } catch { return String(ts); }
+        }
+
+        function formatDuration(start, end) {
+            if (!start || !end) return '--';
+            try {
+                const sec = Math.round((new Date(end) - new Date(start)) / 1000);
+                if (sec < 60)   return sec + 's';
+                if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+                return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+            } catch { return '--'; }
+        }
+
+        function formatEta(seconds) {
+            if (!isFinite(seconds) || seconds <= 0) return '--';
+            if (seconds < 60)   return '~' + Math.ceil(seconds) + 's';
+            if (seconds < 3600) return '~' + Math.ceil(seconds / 60) + 'm';
+            return '~' + Math.floor(seconds / 3600) + 'h ' + Math.ceil((seconds % 3600) / 60) + 'm';
+        }
+
+        // ── Error Modal (DOM-based) ───────────────────────────────────────────
+        async function openErrorModal() {
+            document.getElementById('errorModal').classList.remove('hidden');
+            if (!currentJobId) return;
+            try {
+                const r = await fetch('/api/batch/errors/' + encodeURIComponent(String(currentJobId)));
+                if (!r.ok) throw new Error(await r.text());
+                const data = await r.json();
+                renderErrors(data.errors || []);
+            } catch (e) {
+                const tbody = document.getElementById('errorTableBody');
+                tbody.textContent = '';
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan   = 5;
+                td.className = 'py-6 text-center text-red-400 italic';
+                td.textContent = 'Failed to load errors: ' + e.message;
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+            }
+        }
+
+        function renderErrors(errors) {
+            const tbody = document.getElementById('errorTableBody');
+            tbody.textContent = '';
+
+            if (!errors || errors.length === 0) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan   = 5;
+                td.className = 'py-6 text-center text-gray-400 dark:text-immich-gray-500 italic';
+                td.textContent = 'No errors recorded.';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+                return;
+            }
+
+            errors.forEach(err => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-gray-100 dark:border-immich-gray-800';
+
+                function etd(text, cls) {
+                    const el = document.createElement('td');
+                    el.className   = 'py-2 pr-3 ' + (cls || 'text-gray-600 dark:text-immich-gray-400');
+                    el.textContent = text;
+                    return el;
+                }
+
+                const assetId    = String(err.asset_id || '--');
+                const assetShort = assetId.length > 12 ? assetId.substring(0, 12) + '...' : assetId;
+                const assetTd    = etd(assetShort, 'py-2 pr-3 font-mono text-gray-600 dark:text-immich-gray-400 max-w-[120px] truncate');
+                assetTd.title    = assetId;
+                tr.appendChild(assetTd);
+
+                tr.appendChild(etd(String(err.batch_number ?? '--')));
+                tr.appendChild(etd(String(err.error_type  || '--'), 'py-2 pr-3 text-orange-500 dark:text-orange-400'));
+
+                const msgTd    = etd(String(err.error_message || '--'), 'py-2 pr-3 text-red-500 max-w-xs truncate');
+                msgTd.title    = String(err.error_message || '');
+                tr.appendChild(msgTd);
+
+                tr.appendChild(etd(
+                    formatTimestamp(err.timestamp || err.time || ''),
+                    'py-2 text-gray-400 dark:text-immich-gray-500 whitespace-nowrap'
+                ));
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        function closeErrorModal() {
+            document.getElementById('errorModal').classList.add('hidden');
+        }
+
+        // ── Toast ─────────────────────────────────────────────────────────────
+        function showToast(msg, type) {
+            const toast   = document.getElementById('toast');
+            const content = document.getElementById('toastContent');
+            const colours = {
+                success: 'bg-green-600 text-white',
+                error:   'bg-red-600 text-white',
+                info:    'bg-immich-gray-800 text-white dark:bg-immich-gray-700',
+            };
+            content.className   = 'flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium ' +
+                                  (colours[type] || colours.info);
+            content.textContent = msg;
+            toast.classList.remove('hidden');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.add('hidden'), 4000);
+        }
+
+        // ── Keyboard shortcuts ────────────────────────────────────────────────
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeErrorModal();
+        });
+
+        init();
+    </script>
+</body>
+</html>
