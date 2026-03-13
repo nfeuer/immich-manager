@@ -22,6 +22,64 @@ This document contains all the configuration settings, required services, and se
 
 ---
 
+## 🔧 Prerequisite Setup Steps
+
+Complete these before running the install scripts.
+
+### Immich API Key
+
+The API key lets Immich Manager perform background operations (monthly reminders, server monitoring, backups) on your behalf.
+
+1. Open your Immich web interface
+2. Click your user avatar (top-right) → **Account Settings** → **API Keys**
+3. Click **New API Key**, give it a name (e.g. `Immich Manager`), click **Create**
+4. Copy the key — it is **only shown once**
+5. After install, paste it into both config files:
+   - `photo-curator/config/config.yaml` → `immich.api_key`
+   - `server-manager/config/config.yaml` → `immich.api_key`
+
+> **Security note:** This key has full admin access to Immich. Keep it out of version control.
+
+---
+
+### SMTP / Email (Optional)
+
+Required only if you want monthly curation reminder emails sent to users. Skip this section if you don't need email notifications.
+
+#### Gmail Setup (Recommended)
+
+1. **Enable 2-Factor Authentication**
+   - Go to: https://myaccount.google.com/security
+   - Enable 2-Step Verification if not already on
+
+2. **Create an App Password**
+   - Go to: https://myaccount.google.com/apppasswords
+   - Select **Mail** and **Other (Custom name)**
+   - Name it `Immich Manager`
+   - Copy the 16-character password (no spaces)
+
+3. **Add to your config** (`photo-curator/config/config.yaml`):
+   ```yaml
+   notifications:
+     email:
+       enabled: true
+       smtp_host: "smtp.gmail.com"
+       smtp_port: 587
+       smtp_user: "your-email@gmail.com"
+       smtp_password: "abcd efgh ijkl mnop"  # App password from step 2
+       from: "your-email@gmail.com"
+   ```
+
+**Alternative SMTP Providers:**
+- **SendGrid**: `smtp.sendgrid.net:587` (API key as password)
+- **Mailgun**: `smtp.mailgun.org:587`
+- **Amazon SES**: `email-smtp.<region>.amazonaws.com:587`
+- **Custom**: Use your own mail server
+
+> See [Required API Keys & Services](#-required-api-keys--services) for additional detail on both of these.
+
+---
+
 ## 💾 Drive Setup: mergerfs + SnapRAID
 
 Before installing Immich Manager, set up your storage drives using [mergerfs-snapraid](https://github.com/nfeuer/mergerfs-snapraid). This creates a unified storage pool for Immich's photo library protected against drive failure.
