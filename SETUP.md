@@ -9,16 +9,74 @@ This document contains all the configuration settings, required services, and se
 **Before You Begin:**
 - [ ] Ubuntu/Debian Linux with sudo access
 - [ ] Storage drives set up (see [Drive Setup](#-drive-setup-mergerfs--snapraid) below)
-- [ ] Immich instance running and accessible
+- [ ] Run `./scripts/00-check-prerequisites.sh` — fixes any missing system deps
+- [ ] Start Immich via Docker (see [Docker Setup](#-docker-setup-installing-immich) below)
 - [ ] Domain name for Cloudflare Tunnel (optional but recommended)
 
-> **Note:** Python, Docker, Docker Compose, and other software prerequisites are installed automatically by the setup scripts. You do not need to install them manually.
+> **Note:** Python, Docker Compose, and other software prerequisites are either detected by `00-check-prerequisites.sh` or installed automatically by the phase scripts. You do not need to install them manually.
 
 **Required Setup:**
 - [ ] Configure Immich API access
 - [ ] Set up SMTP for email notifications (optional)
 - [ ] Configure Cloudflare Tunnel (for remote access)
 - [ ] Set curator URL for email links
+
+---
+
+## 🐳 Docker Setup: Installing Immich
+
+This repo ships Docker Compose files for Immich in the `docker/` directory. Run these steps **before** `./install.sh`.
+
+### 1. Run the Prerequisites Check
+
+```bash
+./scripts/00-check-prerequisites.sh
+```
+
+This script checks for Docker, Docker Compose, Python 3.9+, available ports, storage mounts, and more. It prints the exact `apt install` or config commands needed to fix anything that fails. Fix all failures and rerun until it passes cleanly (warnings are OK to proceed with).
+
+### 2. Configure the Docker Environment
+
+```bash
+cp docker/.env.example docker/.env
+nano docker/.env
+```
+
+Key variables to set:
+
+| Variable | Description |
+|----------|-------------|
+| `IMMICH_DB_PASSWORD` | Strong random password — generate: `openssl rand -base64 32` |
+| `IMMICH_UPLOAD_LOCATION` | Photo library storage path (e.g. `/mnt/storage/immich/library` or `./data/library`) |
+| `IMMICH_VERSION` | `release` for latest, or pin to e.g. `v1.117.0` |
+| `IMMICH_ML_GPU_ID` | GPU index for ML inference (default `0`). Comment out the `deploy:` block in `docker/immich.yml` for CPU-only. |
+
+> Keep `docker/.env` out of version control — it's already in `.gitignore`.
+
+### 3. Start Immich
+
+```bash
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml up -d
+```
+
+This creates four containers: `immich-server` (API + web UI on port 2283), `immich-ml` (CLIP / face recognition), `immich-postgres`, and `immich-redis`.
+
+**Verify Immich is running:**
+
+```bash
+curl http://localhost:2283/api/server-info
+```
+
+Allow ~30 seconds for database initialization on first run. See [docs/DOCKER.md](docs/DOCKER.md) for everyday commands (logs, stop, update, GPU assignment).
+
+### 4. First-Time Immich Setup
+
+1. Open `http://localhost:2283` in your browser
+2. Create your admin account
+3. Go to your avatar → **Account Settings** → **API Keys** → create a key
+
+You'll paste this API key into the config files in the next section.
 
 ---
 
@@ -518,9 +576,20 @@ chmod 755 /mnt/backups/immich
 
 ## 🚀 Installation & Startup
 
-### Phase-by-Phase Installation
+### Setup Scripts Overview
 
-Run the master installer which executes all phases in sequence:
+The `scripts/` directory contains numbered setup scripts that handle each installation phase. `./install.sh` runs them all in sequence, or you can run any script individually to install just that component.
+
+| Script | What it does |
+|--------|-------------|
+| `scripts/00-check-prerequisites.sh` | Validates Docker, Python, ports, storage, internet. Prints fix commands for anything missing. Run this first. |
+| `scripts/10-install-server-manager.sh` | Installs Server Manager + smartmontools (disk SMART monitoring). Creates systemd service. |
+| `scripts/20-install-photo-curator.sh` | Installs Photo Curator + OpenCV system libs + ML/AI Python packages. Creates systemd service. |
+| `scripts/30-install-remote-access.sh` | Installs `cloudflared` and configures a Cloudflare Tunnel for remote HTTPS access. Optional. |
+| `scripts/40-security-hardening.sh` | Configures fail2ban, UFW firewall, and security monitoring. |
+| `scripts/50-test-installation.sh` | Runs end-to-end tests to verify all services started correctly. |
+
+### Run the Installer
 
 ```bash
 ./install.sh

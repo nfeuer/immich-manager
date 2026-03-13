@@ -48,40 +48,91 @@ Once your storage pool is ready, proceed with the Immich Manager installation be
 
 ## Installation (5 Minutes)
 
-### 1. Install Immich
-
-Immich must be running before the manager is installed.
-
-**Verify Immich is running:**
-```bash
-curl http://localhost:2283/api/server-info
-```
-
-If not yet installed, follow the [Immich Docker Compose guide](https://immich.app/docs/install/docker-compose). Point the upload path at your storage pool (e.g. `/mnt/storage/immich`).
-
-### 2. Clone Repository
+### 1. Clone Repository
 
 ```bash
 git clone https://github.com/yourusername/immich-manager.git
 cd immich-manager
 ```
 
-### 3. Run Installer
+### 2. Check Prerequisites
+
+Run the prerequisites check script **before anything else**. It verifies Docker, Python, port availability, and storage mounts — and tells you exactly what to fix if something is missing:
+
+```bash
+./scripts/00-check-prerequisites.sh
+```
+
+Fix any failed checks it reports (it prints the exact commands to run), then rerun until it passes.
+
+### 3. Install Immich via Docker
+
+This repo includes Docker Compose files for Immich in the `docker/` directory. Use them to start Immich before running the manager installer.
+
+**3a. Configure the environment file:**
+
+```bash
+cp docker/.env.example docker/.env
+nano docker/.env   # or use your preferred editor
+```
+
+Required settings to fill in:
+
+| Variable | What to set |
+|----------|-------------|
+| `IMMICH_DB_PASSWORD` | A strong random password — generate with `openssl rand -base64 32` |
+| `IMMICH_UPLOAD_LOCATION` | Where Immich stores photos. Use your mergerfs pool path (e.g. `/mnt/storage/immich/library`) or `./data/library` for local disk |
+| `IMMICH_VERSION` | `release` to always pull the latest, or pin to a specific version like `v1.117.0` |
+
+> GPU users: set `IMMICH_ML_GPU_ID` to the index of the GPU to use for ML inference. Run `nvidia-smi --query-gpu=index,name --format=csv` to list available GPUs. Comment out the `deploy:` block in `docker/immich.yml` for CPU-only mode.
+
+**3b. Start Immich:**
+
+```bash
+docker compose --env-file docker/.env \
+  -f docker/core.yml -f docker/immich.yml up -d
+```
+
+This starts four containers: `immich-server`, `immich-ml`, `immich-postgres`, and `immich-redis`.
+
+**3c. Verify Immich is running:**
+
+```bash
+curl http://localhost:2283/api/server-info
+```
+
+Wait ~30 seconds after `up -d` for the first-run database initialization to finish if the API doesn't respond immediately. See [docs/DOCKER.md](docs/DOCKER.md) for everyday Docker commands (logs, stop, pull updates).
+
+**3d. Complete first-time Immich setup:**
+
+1. Open `http://localhost:2283` in your browser
+2. Create your admin account
+3. Go to your avatar → **Account Settings** → **API Keys** → create a key and copy it — you'll need it in Step 4
+
+### 4. Install Immich Manager
+
+Run the master installer. It executes all setup scripts in sequence:
 
 ```bash
 ./install.sh
 ```
 
-The installer will:
-1. Check prerequisites (and install any missing software automatically) ✓
-2. Install Server Manager (includes smartmontools) ✓
-3. Install Photo Curator (includes ML/AI libraries) ✓
-4. Optionally set up remote access
-5. Apply security hardening
+What each phase does:
 
-**Installation takes about 30-60 minutes total** (ML/AI library downloads are the main time cost).
+| Script | Phase | What it installs |
+|--------|-------|-----------------|
+| `scripts/00-check-prerequisites.sh` | 0 | Validates system requirements (also run standalone above) |
+| `scripts/10-install-server-manager.sh` | 1 | Server Manager + smartmontools for disk SMART monitoring |
+| `scripts/20-install-photo-curator.sh` | 2 | Photo Curator + OpenCV system libs + ML/AI Python packages |
+| `scripts/30-install-remote-access.sh` | 3 | Cloudflare Tunnel for remote HTTPS access (optional, prompted) |
+| `scripts/40-security-hardening.sh` | 4 | fail2ban, UFW firewall, security monitoring |
+| `scripts/50-test-installation.sh` | 5 | Verifies all services started correctly |
 
-### 4. Configure Services
+You can also run any individual script directly to reinstall just that phase.
+
+**Installation takes about 30–60 minutes total** (ML/AI library downloads are the main time cost).
+
+### 5. Configure Services
 
 #### Server Manager Configuration
 
@@ -132,14 +183,14 @@ curation:
   reminder_day: 1     # Day of month for reminders
 ```
 
-### 5. Restart Services
+### 6. Restart Services
 
 ```bash
 sudo systemctl restart immich-server-manager
 sudo systemctl restart photo-curator
 ```
 
-### 6. Verify Installation
+### 7. Verify Installation
 
 ```bash
 # Check services are running
