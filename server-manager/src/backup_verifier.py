@@ -136,6 +136,8 @@ class BackupVerifier:
         """
         start_time = datetime.now()
         temp_db_name = f"immich_test_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        container_name = None
+        temp_file = None
 
         try:
             # Create temporary database for testing
@@ -236,12 +238,13 @@ class BackupVerifier:
                 if temp_file and temp_file.exists():
                     temp_file.unlink()
                 # Try to drop test database if it exists
-                subprocess.run(
-                    ['docker', 'exec', container_name, 'psql', '-U', 'postgres', '-c',
-                     f'DROP DATABASE IF EXISTS {temp_db_name}'],
-                    capture_output=True
-                )
-            except:
+                if container_name:
+                    subprocess.run(
+                        ['docker', 'exec', container_name, 'psql', '-U', 'postgres', '-c',
+                         f'DROP DATABASE IF EXISTS {temp_db_name}'],
+                        capture_output=True
+                    )
+            except Exception:
                 pass
 
     def sync_to_offsite(self, backup_file: Path) -> Dict[str, Any]:
