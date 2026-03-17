@@ -149,7 +149,12 @@ If you're using the official `docker-compose.yml` from the Immich release direct
       service: cuda  # NVIDIA CUDA inference
 ```
 
-Download the `hwaccel.transcoding.yml` and `hwaccel.ml.yml` files from the same Immich release as your `docker-compose.yml`.
+**3. Download the hardware acceleration files** — these must be in the same directory as your `docker-compose.yml`:
+
+```bash
+curl -L -o hwaccel.ml.yml https://github.com/immich-app/immich/releases/latest/download/hwaccel.ml.yml
+curl -L -o hwaccel.transcoding.yml https://github.com/immich-app/immich/releases/latest/download/hwaccel.transcoding.yml
+```
 
 ### Supported Hardware Acceleration Options
 
