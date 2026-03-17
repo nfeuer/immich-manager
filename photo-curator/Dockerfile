@@ -59,9 +59,7 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir cmake && \
     git clone --depth 1 https://github.com/davisking/dlib.git /tmp/dlib && \
     cd /tmp/dlib && \
-    python setup.py install \
-        --set DLIB_USE_CUDA=1 \
-        --set CUDA_HOST_COMPILER=/usr/bin/gcc && \
+    DLIB_USE_CUDA=1 CUDA_HOST_COMPILER=/usr/bin/gcc python setup.py install && \
     rm -rf /tmp/dlib
 
 # --- face_recognition (depends on dlib, already built above) ---

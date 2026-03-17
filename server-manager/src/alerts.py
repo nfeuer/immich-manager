@@ -7,9 +7,8 @@ import requests
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timezone
 from typing import Optional, Dict, Any
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +113,7 @@ class AlertManager:
                     "title": title,
                     "description": message,
                     "color": _DISCORD_COLORS.get(severity, 0x0099FF),
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                     "fields": [
                         {"name": "Severity", "value": severity.upper(), "inline": True},
                         {"name": "Source", "value": "Immich Server Manager", "inline": True},
@@ -151,7 +150,7 @@ class AlertManager:
                     "title": f"{_SEVERITY_EMOJI.get(severity, '')} {title}",
                     "description": message,
                     "color": _DISCORD_COLORS.get(severity, 0x0099FF),
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                     "fields": [
                         {"name": "Severity", "value": severity.upper(), "inline": True},
                         {"name": "Server", "value": server_label, "inline": True},
@@ -200,7 +199,7 @@ class AlertManager:
     # Convenience helpers
     # ------------------------------------------------------------------
 
-    def send_disk_health_alert(self, disk_data: Dict[str, Any]):
+    async def send_disk_health_alert(self, disk_data: Dict[str, Any]):
         device = disk_data.get("device", "unknown")
         warnings = disk_data.get("warnings", [])
         if not warnings:
@@ -211,36 +210,34 @@ class AlertManager:
             message += f"  - {w}\n"
 
         severity = "critical" if disk_data.get("smart_status") is False else "warning"
-        asyncio.create_task(
-            self.send_alert(
-                f"Disk Health Warning: {device}",
-                message,
-                severity,
-                {
-                    "temperature": disk_data.get("temperature"),
-                    "power_on_hours": disk_data.get("power_on_hours"),
-                    "model": disk_data.get("model"),
-                },
-            )
+        await self.send_alert(
+            f"Disk Health Warning: {device}",
+            message,
+            severity,
+            {
+                "temperature": disk_data.get("temperature"),
+                "power_on_hours": disk_data.get("power_on_hours"),
+                "model": disk_data.get("model"),
+            },
         )
 
-    def send_backup_alert(self, backup_result: Dict[str, Any]):
+    async def send_backup_alert(self, backup_result: Dict[str, Any]):
         if backup_result["status"] == "success":
             message = (
                 f"Backup completed successfully\n"
                 f"Size: {backup_result.get('size_mb', 0):.2f} MB\n"
                 f"Duration: {backup_result.get('duration_seconds', 0):.1f} seconds"
             )
-            asyncio.create_task(self.send_alert("Backup Completed", message, "info"))
+            await self.send_alert("Backup Completed", message, "info")
         else:
             message = f"Backup failed!\nError: {backup_result.get('error', 'Unknown error')}"
-            asyncio.create_task(self.send_alert("Backup Failed", message, "critical"))
+            await self.send_alert("Backup Failed", message, "critical")
 
-    def send_system_alert(self, metric: str, value: float, threshold: float):
+    async def send_system_alert(self, metric: str, value: float, threshold: float):
         message = (
             f"{metric} has exceeded threshold\n"
             f"Current: {value:.1f}%\n"
             f"Threshold: {threshold}%"
         )
         severity = "critical" if value > threshold + 10 else "warning"
-        asyncio.create_task(self.send_alert(f"System Alert: {metric}", message, severity))
+        await self.send_alert(f"System Alert: {metric}", message, severity)

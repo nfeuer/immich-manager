@@ -326,7 +326,7 @@ async def check_disk_health_job():
 
             # Check for disk errors
             if not disk.get('health_ok', True):
-                alert_manager.send_disk_health_alert(disk)
+                await alert_manager.send_disk_health_alert(disk)
                 database.record_alert(
                     "warning",
                     "disk_health",
@@ -390,7 +390,7 @@ async def backup_job():
         )
 
         # Send alert
-        alert_manager.send_backup_alert(result['database'])
+        await alert_manager.send_backup_alert(result['database'])
 
         print(f"Backup completed: {result['status']}")
 
