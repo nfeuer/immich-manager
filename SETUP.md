@@ -100,14 +100,14 @@ sudo apt-get update
 sudo apt-get install -y nvidia-container-toolkit
 
 # Configure Docker to use it
-sudo nvidia-ctk runtime configure --driver=docker
+sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
 Verify the GPU is accessible from Docker:
 
 ```bash
-docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi
 ```
 
 You should see your GPU listed in the output.
