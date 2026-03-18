@@ -3,7 +3,7 @@ Description=Photo Curator Assistant
 After=network.target
 
 [Service]
-Type=notify
+Type=simple
 User=root
 WorkingDirectory=/opt/photo-curator
 Environment="PATH=/opt/photo-curator/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

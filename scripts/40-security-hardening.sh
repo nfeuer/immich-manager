@@ -50,7 +50,7 @@ findtime = 600
 
 [sshd]
 enabled = true
-port = 2222
+port = 22,2222
 maxretry = 5
 logpath = %(sshd_log)s
 backend = %(sshd_backend)s
@@ -75,7 +75,8 @@ if ! sudo ufw status | grep -q "Status: active"; then
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
 
-    # Allow SSH on non-standard port (important!)
+    # Allow SSH (standard port 22 and non-standard 2222)
+    sudo ufw allow 22/tcp
     sudo ufw allow 2222/tcp
 
     # Allow local network

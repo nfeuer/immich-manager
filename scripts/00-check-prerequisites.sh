@@ -21,17 +21,17 @@ WARNINGS=0
 
 function check_passed() {
     echo -e "${GREEN}[✓]${NC} $1"
-    ((PASSED_CHECKS++))
+    ((PASSED_CHECKS++)) || true
 }
 
 function check_failed() {
     echo -e "${RED}[✗]${NC} $1"
-    ((FAILED_CHECKS++))
+    ((FAILED_CHECKS++)) || true
 }
 
 function check_warning() {
     echo -e "${YELLOW}[!]${NC} $1"
-    ((WARNINGS++))
+    ((WARNINGS++)) || true
 }
 
 echo "╔════════════════════════════════════════╗"

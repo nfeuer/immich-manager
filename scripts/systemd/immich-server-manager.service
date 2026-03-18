@@ -4,7 +4,7 @@ After=network.target docker.service
 Requires=docker.service
 
 [Service]
-Type=notify
+Type=simple
 User=root
 WorkingDirectory=/opt/immich-server-manager
 Environment="PATH=/opt/immich-server-manager/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

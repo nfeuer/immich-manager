@@ -19,17 +19,17 @@ WARNINGS=0
 
 function test_passed() {
     echo -e "${GREEN}✓${NC} $1"
-    ((PASSED++))
+    ((PASSED++)) || true
 }
 
 function test_failed() {
     echo -e "${RED}✗${NC} $1"
-    ((FAILED++))
+    ((FAILED++)) || true
 }
 
 function test_warning() {
     echo -e "${YELLOW}⚠${NC} $1"
-    ((WARNINGS++))
+    ((WARNINGS++)) || true
 }
 
 echo "╔════════════════════════════════════════╗"
