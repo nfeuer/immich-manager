@@ -20,6 +20,7 @@ aiosmtplib>=3.0.2,<4.0
 websockets>=14.0,<17.0
 aiosqlite>=0.20.0,<1.0
 slowapi>=0.1.9,<1.0
-sdnotify>=0.3.2,<1.0  # Systemd watchdog heartbeat
+psutil>=6.0.0,<7.0
+python-multipart>=0.0.9,<1.0
 # ML/AI features (face recognition, scene detection) → requirements-ml.txt
 # Install separately: pip install -r requirements-ml.txt

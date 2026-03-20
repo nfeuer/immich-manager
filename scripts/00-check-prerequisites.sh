@@ -266,7 +266,7 @@ else
     echo ""
     echo "Quick fix commands:"
     echo "  sudo apt update"
-    echo "  sudo apt install -y python3 python3-venv python3-pip docker.io docker-compose-plugin jq curl smartmontools"
+    echo "  sudo apt install -y python3 python3-venv python3-pip python3-dev cmake build-essential docker.io docker-compose-plugin jq curl smartmontools"
     echo "  sudo usermod -aG docker $USER"
     echo "  # Then logout and login again"
     echo ""

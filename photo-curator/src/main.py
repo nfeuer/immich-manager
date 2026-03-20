@@ -25,7 +25,6 @@ import uuid
 import shutil
 import importlib.util
 import html as html_lib
-import sdnotify
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Add project root to path for shared library
@@ -56,6 +55,37 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+class NotAuthenticatedException(Exception):
+    def __init__(self, immich_login_url: str, curator_url: str):
+        self.immich_login_url = immich_login_url
+        self.curator_url = curator_url
+
+
+@app.exception_handler(NotAuthenticatedException)
+async def not_authenticated_handler(request: Request, exc: NotAuthenticatedException):
+    html = f"""<!DOCTYPE html>
+<html>
+<head><title>Login Required</title>
+<style>
+  body {{ font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #e2e8f0; }}
+  .box {{ text-align: center; padding: 2rem; background: #1e293b; border-radius: 1rem; max-width: 400px; }}
+  h2 {{ margin-bottom: 0.5rem; }}
+  p {{ color: #94a3b8; margin-bottom: 1.5rem; }}
+  a.btn {{ display: inline-block; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; margin: 0.25rem; }}
+  .primary {{ background: #6366f1; color: white; }}
+  .secondary {{ background: #334155; color: #e2e8f0; }}
+</style>
+</head>
+<body><div class="box">
+  <h2>Sign in required</h2>
+  <p>Log into Immich, then return to Photo Curator.</p>
+  <a class="btn primary" href="{exc.immich_login_url}" target="_blank">Open Immich Login</a>
+  <a class="btn secondary" href="{exc.curator_url}">I've logged in &rarr;</a>
+</div></body>
+</html>"""
+    return HTMLResponse(content=html, status_code=401)
 
 # CORS - restrict to known origins
 app.add_middleware(
@@ -172,6 +202,7 @@ async def startup_event():
         database = Database()
         ensure_users_table(database)
         app.state.database = database
+        logger.info(f"[DB] Database path: {Path(database.db_path).resolve()}")
         app.state.default_role = config.get("auth", {}).get("default_role", "user")
         app.state.guest_link_default_expiry_days = config.get("auth", {}).get("guest_link_default_expiry_days", 30)
 
@@ -239,13 +270,6 @@ async def startup_event():
             replace_existing=True
         )
 
-        # Watchdog heartbeat (every 30s, half of WatchdogSec=60)
-        async def _watchdog_heartbeat():
-            sd = sdnotify.SystemdNotifier(debug=False)
-            sd.notify("WATCHDOG=1")
-
-        scheduler.add_job(_watchdog_heartbeat, "interval", seconds=30, id="watchdog")
-
         # Initialize batch processor (requires admin client)
         if admin_immich_client:
             batch_config = config.get("batch_processing", {})
@@ -268,10 +292,6 @@ async def startup_event():
 
         scheduler.start()
         logger.info(f"Scheduler started (monthly reminders at {reminder_time})")
-
-        # Signal systemd that we are ready
-        sd = sdnotify.SystemdNotifier(debug=False)
-        sd.notify("READY=1")
 
         logger.info("Photo Curator started successfully (with Immich SSO)")
         logger.info(f"Web UI: http://{config['server']['host']}:{config['server']['port']}")
@@ -371,6 +391,7 @@ async def send_monthly_reminders():
 @app.get("/api/auth/check")
 async def check_auth(user: Optional[Dict] = Depends(get_current_user_optional)):
     """Check if user is authenticated, including role info"""
+    immich_auth = app.state.immich_auth
     if user:
         local = user.get("_local_user", {})
         return {
@@ -381,16 +402,23 @@ async def check_auth(user: Optional[Dict] = Depends(get_current_user_optional)):
                 "name": user.get("name")
             },
             "role": local.get("role", "user"),
+            "logout_url": f"{immich_auth.immich_url}/auth/logout",
         }
     else:
-        immich_auth = app.state.immich_auth
         return {
             "authenticated": False,
             "login_url": f"{immich_auth.immich_url}/auth/login"
         }
 
 
-async def require_user_page(request: Request) -> Dict:
+@app.get("/logout")
+async def logout(request: Request):
+    """Redirect to Immich logout page"""
+    immich_auth = request.app.state.immich_auth
+    return RedirectResponse(url=f"{immich_auth.immich_url}/auth/logout")
+
+
+async def require_user_page(request: Request):
     """Dependency for HTML page routes requiring at least USER role.
 
     Redirects to login if unauthenticated, returns 403 if insufficient role.
@@ -398,9 +426,9 @@ async def require_user_page(request: Request) -> Dict:
     immich_auth = request.app.state.immich_auth
     user = immich_auth.get_user_from_request(request)
     if not user:
-        raise HTTPException(
-            status_code=302,
-            headers={"Location": immich_auth.login_redirect_url(request)},
+        raise NotAuthenticatedException(
+            immich_login_url=f"{immich_auth.immich_url}/auth/login",
+            curator_url=str(request.url),
         )
     db = getattr(request.app.state, "database", None)
     if db:
@@ -544,7 +572,7 @@ async def analyze_month(
     _role=Depends(require_role(Role.USER)),
 ):
     """Analyze all photos for authenticated user's month (requires User role)"""
-    if not admin_immich_client or not analyzer or not database:
+    if not analyzer or not database:
         raise HTTPException(status_code=503, detail="Services not initialized")
 
     user_id = user['id']
@@ -570,37 +598,48 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
     try:
         logger.info(f"Starting analysis for user {user_id}, {year}-{month:02d}")
 
-        # Create user-specific API client
-        user_client = ImmichClient(app.state.immich_api_url, user_token)
+        # Create user-specific API client using Bearer auth (user session token, not API key)
+        logger.info(f"[ANALYZE] Using Immich API URL: {app.state.immich_api_url}")
+        user_client = ImmichClient(app.state.immich_api_url, user_token, use_bearer=True)
 
-        # Fetch photos from Immich (using user's credentials)
-        photos = user_client.get_user_photos(user_id, year, month)
+        # Verify Immich is reachable before proceeding
+        reachable = await asyncio.to_thread(user_client.check_connection)
+        logger.info(f"[ANALYZE] Immich reachable: {reachable}")
+
+        # Fetch photos from Immich — blocking network I/O, run off the event loop
+        photos = await asyncio.to_thread(user_client.get_user_photos, user_id, year, month)
 
         if not photos:
-            logger.warning(f"No photos found for {year}-{month:02d}")
+            logger.warning(f"[ANALYZE] No photos returned from Immich for {year}-{month:02d} (user={user_id})")
             return
 
-        logger.info(f"Analyzing {len(photos)} photos...")
+        logger.info(f"[ANALYZE] Fetched {len(photos)} photos from Immich, starting ML analysis...")
 
-        # Analyze each photo
+        # Build set of already-analyzed asset IDs once before the loop
+        existing_scores = database.get_photo_scores(user_id, year, month)
+        analyzed_ids = {score['asset_id'] for score in existing_scores}
+
+        # Analyze each photo — all blocking I/O and CPU work runs in a thread
+        # so the event loop (and watchdog heartbeat) stays responsive.
         for i, photo in enumerate(photos):
             asset_id = photo['id']
 
             # Check if already analyzed
-            existing_scores = database.get_photo_scores(user_id, year, month)
-            if any(score['asset_id'] == asset_id for score in existing_scores):
+            if asset_id in analyzed_ids:
                 continue
 
-            # Download photo (use thumbnail for speed)
+            # Download photo (use thumbnail for speed) — blocking network I/O
             cached_path = photo_cache.get_cached_path(asset_id)
             if not cached_path:
-                photo_path = user_client.download_photo(asset_id, use_thumbnail=True)
+                photo_path = await asyncio.to_thread(
+                    user_client.download_photo, asset_id, None, True
+                )
                 if photo_path:
                     cached_path = photo_cache.add_to_cache(asset_id, photo_path)
 
             if cached_path:
-                # Analyze photo
-                scores = analyzer.analyze_photo(cached_path)
+                # Analyze photo — blocking CPU-heavy ML inference
+                scores = await asyncio.to_thread(analyzer.analyze_photo, cached_path)
 
                 if scores.get('success'):
                     # Save core quality scores
@@ -648,7 +687,7 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
             ai_suggested
         )
 
-        # Find duplicates
+        # Find duplicates — blocking CPU work
         all_scores = database.get_photo_scores(user_id, year, month)
         photos_with_hash = [
             {'id': s['asset_id'], 'perceptual_hash': s['perceptual_hash']}
@@ -656,7 +695,7 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
             if s.get('perceptual_hash')
         ]
 
-        duplicates = analyzer.find_duplicates(photos_with_hash)
+        duplicates = await asyncio.to_thread(analyzer.find_duplicates, photos_with_hash)
         for dup_group in duplicates:
             database.save_duplicate_group(dup_group)
 
@@ -667,7 +706,7 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
         _cluster_face_identities(user_id)
 
     except Exception as e:
-        logger.error(f"Error in background analysis: {e}")
+        logger.error(f"[ANALYZE] Error in background analysis: {e}", exc_info=True)
 
 
 @app.get("/api/photos/{year}/{month}")
@@ -684,8 +723,22 @@ async def get_monthly_photos(
 
     user_id = user['id']
 
+    logger.info(f"[PHOTOS] Loading photos for user={user_id} {year}-{month:02d}")
+
     # Get scores from database
     scores = database.get_photo_scores(user_id, year, month)
+
+    logger.info(f"[PHOTOS] Found {len(scores)} scored photos in DB for user={user_id} {year}-{month:02d}")
+    if not scores:
+        # Check if there are ANY photos for this user at all
+        from .database import Database as _DB
+        with database._get_connection() as _conn:
+            _row = _conn.execute(
+                "SELECT COUNT(*) as total FROM photo_scores WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            logger.info(f"[PHOTOS] Total photos in DB for this user across all months: {_row['total']}")
+            _row2 = _conn.execute("SELECT COUNT(*) as total FROM photo_scores").fetchone()
+            logger.info(f"[PHOTOS] Total photos in DB across ALL users: {_row2['total']}")
 
     # Create user-specific API client for thumbnail URLs
     user_client = ImmichClient(app.state.immich_api_url, user['access_token'])

@@ -738,6 +738,53 @@ sudo journalctl -u photo-curator | grep "reminder"
 
 ## 🐛 Troubleshooting
 
+### Installation Fails: `venv/bin/activate: No such file or directory`
+**Cause**: `python3-venv` is not installed. On Ubuntu/Debian, `python3 -m venv` can silently create a broken venv without this package.
+
+**Fix**:
+```bash
+sudo apt install -y python3-venv
+sudo rm -rf /opt/immich-server-manager/venv
+./install.sh
+```
+
+---
+
+### Installation Fails: `ModuleNotFoundError: No module named 'shared'`
+**Cause**: The `shared/` auth library was not copied to the install directory. This can happen if Phase 1 was interrupted before completing.
+
+**Fix**:
+```bash
+sudo cp -r /path/to/immich-manager/shared /opt/immich-server-manager/shared
+sudo systemctl restart immich-server-manager
+```
+
+---
+
+### Installer Re-runs Phase 0 and Fails Port Check After Phase 1 Is Done
+**Cause**: The installation state file lives at `~/.immich-install-state.json`. If it is missing or incomplete (e.g. the terminal closed before Phase 1 completed), the installer thinks Phase 1 was never finished and re-runs prerequisites — which now fail because port 8080 is in use by the running service.
+
+**Fix**: Manually mark Phase 1 complete in the state file:
+```bash
+# Create or overwrite with all Phase 1 steps marked complete
+printf '{\n  "phase1_server_manager_create_directory": "complete",\n  "phase1_server_manager_create_venv": "complete",\n  "phase1_server_manager_install_dependencies": "complete",\n  "phase1_server_manager_configure": "complete",\n  "phase1_server_manager_init_database": "complete",\n  "phase1_server_manager_install_systemd": "complete",\n  "phase1_server_manager_start_service": "complete",\n  "phase1_server_manager_verify": "complete",\n  "phase1_server_manager_status": "complete"\n}\n' > ~/.immich-install-state.json
+```
+Then re-run `./install.sh`.
+
+---
+
+### Photo Curator Auth Loop (Login → Immich → Back to Login)
+**Cause**: Two separate bugs that can cause this:
+
+1. `GET /api/auth/validateToken` returns 404 in newer Immich versions — fixed by using `GET /api/users/me` instead
+2. FastAPI dependency returning `HTMLResponse` instead of raising an exception — the route executes anyway and serves the curator UI, then JS auth check fails and redirects
+
+**Fix**: Both are already corrected in `photo-curator/src/auth.py` and `main.py`. If you see this on a fresh install, ensure the installed files match the repo.
+
+**Debugging**: Open browser dev tools → Network tab → look for the `/api/auth/check` response. If it returns `{"authenticated": false}`, the cookie isn't being read. Check the cookie name — photo-curator looks for `immich_access_token`.
+
+---
+
 ### Email Not Sending
 **Check**:
 1. SMTP credentials correct?

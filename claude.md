@@ -1,5 +1,63 @@
 # Immich Manager - Future Features & Ideas
 
+---
+
+## Current Status (as of 2026-03-18)
+
+### What's Working
+- Immich running via Docker (4 containers: server, ml, postgres, redis)
+- Server Manager installed at `/opt/immich-server-manager`, running on port 8080
+- Photo Curator installed at `/opt/photo-curator`, running on port 8081
+- Cloudflare Tunnel running (`immich.houseoffeuer.com` confirmed working)
+- Security hardening complete (fail2ban, UFW)
+- Immich SSO auth working in photo curator (cookie-based via `immich_access_token`)
+
+### Known Issues to Debug Tomorrow
+
+#### 1. Photo Curator — Photos Not Loading from Immich
+- The curator UI loads and auth works
+- Photos are not being fetched/displayed from Immich
+- Likely causes to investigate:
+  - Check `GET /api/photos` endpoint in photo-curator — does it correctly call Immich API?
+  - Verify the Immich API key in `/opt/photo-curator/config/config.yaml` is valid
+  - Check for errors in `sudo journalctl -u photo-curator -f` when navigating to photos
+  - The `ImmichClient` in `photo-curator/src/immich_client.py` — verify it uses the correct API endpoints for the installed Immich version
+  - Batch processing was disabled at startup due to "no admin API key" — verify the key was saved correctly after the config edit
+
+#### 2. Photo Curator — Crashes
+- Service crashes intermittently
+- Start debugging with: `sudo journalctl -u photo-curator -n 100 --no-pager`
+- Look for the stack trace just before the crash
+
+#### 3. Caddy Reverse Proxy — NOT YET IMPLEMENTED
+- **This is the next infrastructure task**
+- Goal: put all services behind Caddy on port 80 so they share cookie scope
+- Plan:
+  - Create `docker/proxy.yml` with Caddy container on the homelab network
+  - Create `docker/caddy/Caddyfile` with path-based routing:
+    - `localhost/` → Immich (`immich-server:2283` via Docker network)
+    - `localhost/curator/` → Photo Curator (`host.docker.internal:8081`)
+    - `localhost/monitor/` → Server Manager (`host.docker.internal:8080`)
+  - Add `extra_hosts: ["host.docker.internal:host-gateway"]` to Caddy service so it can reach host systemd services
+  - Update Cloudflare tunnel to point to `localhost:80` instead of individual ports
+  - Update photo-curator and server-manager uvicorn launch with `--root-path` flag
+  - Update all JS `fetch()` calls in `curator.html` to use a configurable `window.API_BASE`
+  - See `docker/core.yml` for the existing Caddy placeholder config
+
+### Installation Bugs Fixed (so future installs won't hit these)
+- `python3-venv` not installed → added to prerequisites quick-fix command
+- `cmake` + `build-essential` not installed → added to Phase 2 before ML pip installs
+- `libgl1-mesa-glx` renamed to `libgl1` in Ubuntu 24.04 → fixed in Phase 2
+- `shared/` module not copied to install dirs → fixed in Phase 1 and Phase 2 scripts
+- `cp -r shared /dest/shared` creates `shared/shared` if dest exists → fixed with `mkdir -p` + `cp -r shared/. /dest/shared/`
+- Install state file in `/tmp` (lost on reboot) → moved to `~/.immich-install-state.json`
+- Phase 0 re-runs when Phase 1 is already complete → install.sh now skips Phase 0 if Phase 1 is marked complete
+- `psutil` and `python-multipart` missing from photo-curator requirements → added
+- FastAPI dependency returning HTMLResponse instead of raising exception → fixed with `NotAuthenticatedException` + exception handler
+- Immich auth token validation used wrong endpoint (`/api/auth/validateToken` → 404) → fixed to use `/api/users/me`
+
+---
+
 This document tracks feature ideas and improvements for future implementation.
 
 ## Features Saved for Later Implementation

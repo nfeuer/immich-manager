@@ -53,27 +53,18 @@ class ImmichAuth:
         if not access_token:
             return None
 
-        # Validate token with Immich API
+        # Validate token and fetch user info in one call
         try:
             response = requests.get(
-                f"{self.api_url}/auth/validateToken",
+                f"{self.api_url}/users/me",
                 headers={'Authorization': f'Bearer {access_token}'},
                 timeout=5
             )
 
             if response.status_code == 200:
-                # Token is valid, get user info
-                user_response = requests.get(
-                    f"{self.api_url}/users/me",
-                    headers={'Authorization': f'Bearer {access_token}'},
-                    timeout=5
-                )
-
-                if user_response.status_code == 200:
-                    user_data = user_response.json()
-                    # Add token for future API calls
-                    user_data['access_token'] = access_token
-                    return user_data
+                user_data = response.json()
+                user_data['access_token'] = access_token
+                return user_data
 
         except requests.RequestException as e:
             logger.error(f"Error validating token: {e}")
@@ -90,18 +81,16 @@ class ImmichAuth:
         Returns:
             Immich login URL with return path
         """
-        # Get current path to return to after login
-        return_path = str(request.url.path)
-        if request.url.query:
-            return_path += f"?{request.url.query}"
+        # Use the full URL so Immich redirects back to photo-curator after login,
+        # not back to Immich's own root
+        return_url = str(request.url)
 
         # Immich login URL
-        return f"{self.immich_url}/auth/login?returnUrl={return_path}"
+        return f"{self.immich_url}/auth/login?returnUrl={return_url}"
 
 
 async def get_current_user(
     request: Request,
-    immich_auth: ImmichAuth = None
 ) -> Dict[str, Any]:
     """
     Dependency to get current authenticated user
@@ -116,10 +105,7 @@ async def get_current_user(
     Raises:
         HTTPException: If not authenticated
     """
-    if immich_auth is None:
-        # Get from app state
-        immich_auth = request.app.state.immich_auth
-
+    immich_auth = request.app.state.immich_auth
     user = immich_auth.get_user_from_request(request)
 
     if not user:
@@ -146,7 +132,6 @@ async def get_current_user(
 
 async def get_current_user_optional(
     request: Request,
-    immich_auth: ImmichAuth = None
 ) -> Optional[Dict[str, Any]]:
     """
     Get current user without requiring authentication
@@ -159,9 +144,7 @@ async def get_current_user_optional(
     Returns:
         User dictionary or None
     """
-    if immich_auth is None:
-        immich_auth = request.app.state.immich_auth
-
+    immich_auth = request.app.state.immich_auth
     user = immich_auth.get_user_from_request(request)
     if user:
         db = getattr(request.app.state, "database", None)

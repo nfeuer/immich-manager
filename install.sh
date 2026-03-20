@@ -13,6 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/scripts/lib/state-manager.sh"
 
 echo "╔════════════════════════════════════════╗"
 echo "║   Immich Ecosystem Installer v1.0.0   ║"
@@ -72,13 +73,17 @@ echo " Phase 0: Checking Prerequisites"
 echo "═══════════════════════════════════════════"
 echo ""
 
-$SCRIPT_DIR/scripts/00-check-prerequisites.sh
+if check_phase_complete "phase1_server_manager"; then
+    echo "Skipping prerequisites check (Phase 1 already complete)"
+else
+    $SCRIPT_DIR/scripts/00-check-prerequisites.sh
 
-if [ $? -ne 0 ]; then
-    echo ""
-    echo -e "${RED}✗ Prerequisites check failed${NC}"
-    echo "Please fix the issues above and rerun this script"
-    exit 1
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo -e "${RED}✗ Prerequisites check failed${NC}"
+        echo "Please fix the issues above and rerun this script"
+        exit 1
+    fi
 fi
 
 # Phase 1: Server Manager

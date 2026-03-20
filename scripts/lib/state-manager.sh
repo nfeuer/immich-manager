@@ -4,7 +4,7 @@
 # Tracks progress of multi-phase installation for idempotency and resumability
 #
 
-STATE_FILE="${STATE_FILE:-/tmp/.immich-install-state.json}"
+STATE_FILE="${STATE_FILE:-$HOME/.immich-install-state.json}"
 
 # Initialize state file if it doesn't exist
 _init_state() {

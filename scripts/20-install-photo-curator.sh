@@ -35,6 +35,10 @@ sudo chown $USER:$USER /opt/photo-curator
 
 cp -r "$SCRIPT_DIR/../photo-curator/"* /opt/photo-curator/
 
+# Copy shared library (used by both server-manager and photo-curator)
+mkdir -p /opt/photo-curator/shared
+cp -r "$SCRIPT_DIR/../shared/." /opt/photo-curator/shared/
+
 mark_step_complete "phase2_photo_curator" "create_directory"
 echo -e "${GREEN}✓${NC} Directory created"
 
@@ -62,14 +66,23 @@ mark_step_start "phase2_photo_curator" "install_dependencies"
 pip install --upgrade pip > /dev/null
 pip install -r requirements.txt
 
+# Install system dependencies required before pip ML packages
+# cmake + build-essential: needed to compile dlib from source
+# libgl1-mesa-glx + libglib2.0-0: needed by OpenCV
+sudo apt-get update > /dev/null
+sudo apt-get install -y cmake build-essential libgl1 libglib2.0-0 > /dev/null
+
 # Install ML/AI dependencies (face recognition, scene detection)
 # dlib requires cmake + build-essential; torch is ~2 GB — expect several minutes
 echo "Installing ML/AI dependencies (dlib, torch — this takes a few minutes)..."
-pip install -r requirements-ml.txt
 
-# Install system dependencies for OpenCV
-sudo apt-get update > /dev/null
-sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 > /dev/null
+# Install dlib + face_recognition first (no CUDA index needed)
+pip install face_recognition dlib
+
+# Install PyTorch with CUDA 11.8 index so Pascal GPUs (sm_61, e.g. GTX 1080)
+# are supported. The default PyPI torch builds target CUDA 12.x which dropped sm_61.
+echo "Installing PyTorch (cu118 build for GTX 1080 / Pascal GPU compatibility)..."
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 mark_step_complete "phase2_photo_curator" "install_dependencies"
 echo -e "${GREEN}✓${NC} Dependencies installed"

@@ -16,21 +16,30 @@ logger = logging.getLogger(__name__)
 class ImmichClient:
     """Client for interacting with Immich API"""
 
-    def __init__(self, api_url: str, api_key: str):
+    def __init__(self, api_url: str, api_key: str, use_bearer: bool = False):
         """
         Initialize Immich API client
 
         Args:
             api_url: Immich API base URL (e.g., http://localhost:2283/api)
-            api_key: Immich API key
+            api_key: Immich API key or user session token
+            use_bearer: If True, send token as Authorization: Bearer (for user session tokens).
+                        If False (default), send as x-api-key (for admin API keys).
         """
         self.api_url = api_url.rstrip('/')
         self.api_key = api_key
+        self._use_bearer = use_bearer
         self.session = requests.Session()
-        self.session.headers.update({
-            'x-api-key': api_key,
-            'Accept': 'application/json'
-        })
+        if use_bearer:
+            self.session.headers.update({
+                'Authorization': f'Bearer {api_key}',
+                'Accept': 'application/json'
+            })
+        else:
+            self.session.headers.update({
+                'x-api-key': api_key,
+                'Accept': 'application/json'
+            })
 
     def get_users(self) -> List[Dict[str, Any]]:
         """
@@ -78,14 +87,17 @@ class ImmichClient:
             start_str = start_date.isoformat() + 'Z'
             end_str = end_date.isoformat() + 'Z'
 
-            # Search for photos
+            # Search for photos.
+            # userId filter requires admin privilege; with user bearer tokens the
+            # search is already scoped to the authenticated user so we omit it.
             search_payload = {
                 'takenAfter': start_str,
                 'takenBefore': end_str,
-                'userId': user_id,
                 'type': 'IMAGE',
                 'size': 10000  # Max results
             }
+            if not getattr(self, '_use_bearer', False):
+                search_payload['userId'] = user_id
 
             response = self.session.post(
                 f"{self.api_url}/search/metadata",
@@ -119,11 +131,12 @@ class ImmichClient:
             search_payload = {
                 'takenAfter': start_str,
                 'takenBefore': end_str,
-                'userId': user_id,
                 'type': 'IMAGE',
                 'size': 50000,
                 'withExif': True,
             }
+            if not self._use_bearer:
+                search_payload['userId'] = user_id
 
             response = self.session.post(
                 f"{self.api_url}/search/metadata",

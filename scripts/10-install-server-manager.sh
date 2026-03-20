@@ -37,6 +37,10 @@ sudo chown $USER:$USER /opt/immich-server-manager
 # Copy source files
 cp -r "$SCRIPT_DIR/../server-manager/"* /opt/immich-server-manager/
 
+# Copy shared library (used by both server-manager and photo-curator)
+mkdir -p /opt/immich-server-manager/shared
+cp -r "$SCRIPT_DIR/../shared/." /opt/immich-server-manager/shared/
+
 mark_step_complete "phase1_server_manager" "create_directory"
 echo -e "${GREEN}✓${NC} Directory created"
 
