@@ -183,15 +183,12 @@ def validate_immich_token(api_url: str, token: str) -> Optional[Dict[str, Any]]:
     """Validate a token against the Immich API and return user info.
 
     Returns the user dict from ``/users/me`` on success, or ``None``.
+
+    Note: /auth/validateToken was removed in Immich v2.x. Validation is now
+    done directly via /users/me.
     """
     headers = {"Authorization": f"Bearer {token}"}
     try:
-        resp = http_requests.get(
-            f"{api_url}/auth/validateToken", headers=headers, timeout=5,
-        )
-        if resp.status_code != 200:
-            return None
-
         user_resp = http_requests.get(
             f"{api_url}/users/me", headers=headers, timeout=5,
         )
