@@ -160,6 +160,50 @@
                         `).join('')}
                     </div>
                 ` : ''}
+
+                <!-- Log Viewer Panel -->
+                <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5 mt-5">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">📋 Log Viewer</h2>
+                    <div class="flex flex-wrap gap-3 mb-3 items-center">
+                        <select id="logServiceSelect" class="px-3 py-2 rounded-lg text-sm bg-gray-100 dark:bg-immich-gray-800 border border-gray-200 dark:border-immich-gray-700 text-gray-900 dark:text-white cursor-pointer" onchange="onLogServiceChange()">
+                            <option value="immich_server">immich_server</option>
+                            <option value="immich_machine_learning">immich_machine_learning</option>
+                            <option value="immich_postgres">immich_postgres</option>
+                            <option value="immich_redis">immich_redis</option>
+                            <option value="server_manager">server_manager</option>
+                            <option value="photo_curator">photo_curator</option>
+                            <option value="system">system</option>
+                        </select>
+                        <button class="px-4 py-2 bg-immich-primary hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer border-none" onclick="loadLogSnapshot()">Refresh</button>
+                        <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300 select-none">
+                            <input type="checkbox" id="logLiveToggle" class="cursor-pointer" onchange="toggleLogStream()">
+                            Live
+                        </label>
+                    </div>
+                    <pre id="logOutput" class="bg-gray-950 text-gray-200 rounded-lg p-3 text-xs font-mono h-72 overflow-y-auto whitespace-pre-wrap break-all">Select a service and click Refresh to load logs.</pre>
+                </div>
+
+                <!-- Service Controls Panel -->
+                <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5 mt-5">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">⚙️ Service Controls</h2>
+                    <div class="space-y-2">
+                        ${["immich_server","immich_machine_learning","immich_postgres","immich_redis","server_manager","photo_curator"].map(svc => `
+                            <div class="flex justify-between items-center py-2 border-b border-gray-50 dark:border-immich-gray-800 last:border-0">
+                                <span class="text-sm font-mono text-gray-700 dark:text-gray-300">${esc(svc)}</span>
+                                <button id="restartBtn_${esc(svc)}" class="px-3 py-1.5 bg-immich-primary hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors cursor-pointer border-none" onclick="restartService('${esc(svc)}')">Restart</button>
+                            </div>
+                        `).join('')}
+                        <div class="pt-3 text-right">
+                            <button class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer border-none" onclick="restartAllServices()">Restart All Immich Services</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Update Management Panel -->
+                <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5 mt-5" id="updatePanel">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">🔄 Update Management</h2>
+                    <div id="updateStatus" class="text-sm text-gray-500 dark:text-gray-400">Loading version info...</div>
+                </div>
             `;
         }
 
@@ -180,6 +224,229 @@
 
         // Auto-refresh every 30 seconds
         refreshInterval = setInterval(fetchData, 30000);
+
+        // --- Log Viewer ---
+        let _logEventSource = null;
+
+        function onLogServiceChange() {
+            const live = document.getElementById('logLiveToggle');
+            if (live && live.checked) {
+                live.checked = false;
+                stopLogStream();
+            }
+            loadLogSnapshot();
+        }
+
+        async function loadLogSnapshot() {
+            const svc = document.getElementById('logServiceSelect');
+            if (!svc) return;
+            const service = svc.value;
+            const out = document.getElementById('logOutput');
+            if (!out) return;
+            out.textContent = 'Loading...';
+            try {
+                const r = await fetch(`/api/logs/${encodeURIComponent(service)}`);
+                if (!r.ok) throw new Error(r.status);
+                const data = await r.json();
+                out.textContent = (data.lines || []).join('\n') || '(no output)';
+                out.scrollTop = out.scrollHeight;
+            } catch (e) {
+                out.textContent = `Failed to load logs: ${e}`;
+            }
+        }
+
+        function toggleLogStream() {
+            const toggle = document.getElementById('logLiveToggle');
+            if (!toggle) return;
+            if (toggle.checked) startLogStream();
+            else stopLogStream();
+        }
+
+        function startLogStream() {
+            const svc = document.getElementById('logServiceSelect');
+            if (!svc) return;
+            const service = svc.value;
+            const out = document.getElementById('logOutput');
+            if (!out) return;
+            stopLogStream();
+            out.textContent = '';
+            _logEventSource = new EventSource(`/api/logs/${encodeURIComponent(service)}/stream`);
+            _logEventSource.onmessage = (e) => {
+                out.textContent += e.data + '\n';
+                out.scrollTop = out.scrollHeight;
+            };
+            _logEventSource.onerror = () => {
+                const toggle = document.getElementById('logLiveToggle');
+                if (toggle) toggle.checked = false;
+                stopLogStream();
+            };
+        }
+
+        function stopLogStream() {
+            if (_logEventSource) { _logEventSource.close(); _logEventSource = null; }
+        }
+
+        // --- Service Controls ---
+        async function restartService(service) {
+            if (!confirm(`Restart ${service}?`)) return;
+            const btn = document.getElementById(`restartBtn_${service}`);
+            if (btn) { btn.textContent = '...'; btn.disabled = true; }
+            try {
+                const r = await fetch(`/api/services/${encodeURIComponent(service)}/restart`, { method: 'POST' });
+                if (btn) btn.textContent = r.ok ? '✓' : '✗';
+                setTimeout(() => { if (btn) { btn.textContent = 'Restart'; btn.disabled = false; } }, 3000);
+            } catch (e) {
+                if (btn) { btn.textContent = '✗'; btn.disabled = false; }
+            }
+        }
+
+        async function restartAllServices() {
+            if (!confirm('Restart ALL Immich services? This will briefly interrupt Immich.')) return;
+            try {
+                const r = await fetch('/api/services/restart-all', { method: 'POST' });
+                const data = await r.json();
+                window.alert(r.ok ? 'All services restarted.' : `Failed: ${data.detail || 'unknown error'}`);
+            } catch (e) {
+                window.alert('Failed to restart all services.');
+            }
+        }
+
+        // --- Update Management ---
+        let _updateEventSource = null;
+
+        function _makeEl(tag, cls, text) {
+            const el = document.createElement(tag);
+            if (cls) el.className = cls;
+            if (text != null) el.textContent = text;
+            return el;
+        }
+
+        async function loadUpdateStatus() {
+            const statusEl = document.getElementById('updateStatus');
+            if (!statusEl) return;
+            statusEl.textContent = 'Loading version info...';
+
+            try {
+                const r = await fetch('/api/updates/status');
+                if (!r.ok) throw new Error(r.status);
+                const data = await r.json();
+
+                const current = data.current_version || 'unknown';
+                const latest = data.latest_version || 'unknown';
+                const upToDate = !data.update_available;
+
+                statusEl.textContent = '';
+
+                // Version row
+                const row = _makeEl('div', 'flex flex-wrap gap-4 items-center mb-4');
+
+                const curSpan = _makeEl('span', 'text-gray-700 dark:text-gray-300');
+                curSpan.append('Current: ', _makeEl('span', 'font-mono font-semibold', `v${current}`));
+                row.appendChild(curSpan);
+
+                const latSpan = _makeEl('span', 'text-gray-700 dark:text-gray-300');
+                latSpan.append('Latest: ', _makeEl('span', 'font-mono font-semibold', `v${latest}`));
+                row.appendChild(latSpan);
+
+                // Changelog link — only allow github.com URLs
+                if (data.changelog_url && data.changelog_url.startsWith('https://github.com/')) {
+                    const a = _makeEl('a', 'text-immich-primary hover:underline text-sm', 'View Changelog ↗');
+                    a.href = data.changelog_url;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    row.appendChild(a);
+                }
+
+                if (upToDate) {
+                    row.appendChild(_makeEl('span',
+                        'px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm font-medium',
+                        'Up to date ✓'));
+                } else {
+                    const btn = _makeEl('button',
+                        'px-4 py-2 bg-immich-primary hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer border-none',
+                        'Apply Update');
+                    btn.addEventListener('click', applyUpdate);
+                    row.appendChild(btn);
+                }
+                statusEl.appendChild(row);
+
+                // Progress area (hidden until update triggered)
+                const prog = _makeEl('div',
+                    'hidden mb-4 bg-gray-950 text-gray-200 rounded-lg p-3 text-xs font-mono max-h-40 overflow-y-auto');
+                prog.id = 'updateProgress';
+                statusEl.appendChild(prog);
+
+                // History
+                const history = data.history || [];
+                if (history.length > 0) {
+                    const section = _makeEl('div', 'border-t border-gray-100 dark:border-immich-gray-800 pt-3');
+                    section.appendChild(_makeEl('h3',
+                        'text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2', 'Update History'));
+                    const table = _makeEl('table', 'text-sm w-full');
+                    history.slice(0, 5).forEach(h => {
+                        const ts = h.timestamp ? new Date(h.timestamp).toLocaleDateString() : '';
+                        const ok = h.status === 'success';
+                        const tr = _makeEl('tr');
+                        const td1 = _makeEl('td', 'py-1 pr-4 text-gray-500 dark:text-gray-400', ts);
+                        const td2 = _makeEl('td', 'py-1 pr-4 font-mono text-xs',
+                            `v${h.from_version || ''} → v${h.to_version || ''}`);
+                        const td3 = _makeEl('td',
+                            `py-1 font-medium ${ok ? 'text-green-500' : 'text-red-500'}`,
+                            ok ? '✓ success' : `✗ ${h.status}`);
+                        tr.append(td1, td2, td3);
+                        table.appendChild(tr);
+                    });
+                    section.appendChild(table);
+                    statusEl.appendChild(section);
+                }
+            } catch (e) {
+                if (statusEl) statusEl.textContent = `Failed to load update status: ${e}`;
+            }
+        }
+
+        async function applyUpdate() {
+            if (!confirm('Apply the latest Immich update? A snapshot will be taken first and rollback is automatic on failure.')) return;
+            try {
+                const r = await fetch('/api/updates/apply', { method: 'POST' });
+                const data = await r.json();
+                if (data.status === 'up_to_date') { window.alert('Already up to date.'); return; }
+                if (!r.ok) { window.alert(`Failed to start update: ${data.detail || 'unknown error'}`); return; }
+                const prog = document.getElementById('updateProgress');
+                if (prog) { prog.textContent = ''; prog.classList.remove('hidden'); }
+                startUpdateStream();
+            } catch (e) {
+                window.alert(`Failed to start update: ${e}`);
+            }
+        }
+
+        function startUpdateStream() {
+            if (_updateEventSource) { _updateEventSource.close(); }
+            _updateEventSource = new EventSource('/api/updates/apply/stream');
+            _updateEventSource.onmessage = (e) => {
+                const prog = document.getElementById('updateProgress');
+                if (!prog) return;
+                try {
+                    const obj = JSON.parse(e.data);
+                    const line = _makeEl('div', null);
+                    if (obj.step === 'done') line.className = 'text-green-400';
+                    else if (obj.step === 'rolled_back' || obj.step === 'error') line.className = 'text-red-400';
+                    line.textContent = `[${obj.step}] ${obj.message}`;
+                    prog.appendChild(line);
+                    prog.scrollTop = prog.scrollHeight;
+                    if (['done', 'rolled_back', 'error'].includes(obj.step)) {
+                        _updateEventSource.close();
+                        _updateEventSource = null;
+                        loadUpdateStatus();
+                    }
+                } catch (_) {}
+            };
+            _updateEventSource.onerror = () => {
+                if (_updateEventSource) { _updateEventSource.close(); _updateEventSource = null; }
+            };
+        }
+
+        // Load update status after initial render
+        setTimeout(loadUpdateStatus, 500);
     </script>
 </body>
 </html>

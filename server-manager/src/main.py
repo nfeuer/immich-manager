@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import uvicorn
 import asyncio
+import subprocess
 import requests as http_requests
 import logging
 import sdnotify
@@ -35,6 +37,7 @@ from .auto_updater import AutoUpdater
 from .prometheus import generate_metrics
 from .audit import ensure_audit_table, record_audit, get_audit_log
 from .logging_config import setup_json_logging
+from .logs import get_log_snapshot, stream_log_lines
 from shared.auth import (
     Role, ensure_users_table, get_or_create_user, require_role,
     get_all_users, update_user_role, extract_token, validate_immich_token,
@@ -983,9 +986,32 @@ async def apply_update(
                  details=f"target_version={latest}",
                  ip_address=request.client.host if request.client else None)
 
+    import json as _json
+
     async def _run():
-        result = auto_updater.apply_update(latest)
+        global _update_progress, _update_in_progress
+        _update_progress = []
+        _update_in_progress = True
+
+        def _emit(step: str, message: str):
+            _update_progress.append(_json.dumps({"step": step, "message": message}))
+
+        _emit("snapshot", "Creating pre-update snapshot...")
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, auto_updater.apply_update, latest
+        )
         logger.info(f"Manual update result: {result}")
+
+        if result["status"] == "success":
+            _emit("done", f"Updated to v{result['to_version']} successfully")
+        else:
+            if result.get("rolled_back"):
+                _emit("rolled_back", f"Update failed and was rolled back: {result.get('error')}")
+            else:
+                _emit("error", f"Update failed: {result.get('error')}")
+
+        _update_in_progress = False
+
         if alert_manager:
             if result["status"] == "success":
                 await alert_manager.send_alert(
@@ -1005,6 +1031,179 @@ async def apply_update(
         "message": f"Update to v{latest} started in background (snapshot will be taken first)",
         "target_version": latest,
     }
+
+
+# --- Valid service identifiers ---
+_VALID_SERVICES = {
+    "immich_server", "immich_machine_learning", "immich_postgres", "immich_redis",
+    "server_manager", "photo_curator", "system",
+}
+
+_DOCKER_SERVICES = {"immich_server", "immich_machine_learning", "immich_postgres", "immich_redis"}
+_SYSTEMD_SERVICES = {"server_manager": "immich-server-manager", "photo_curator": "photo-curator"}
+
+
+# --- Log endpoints ---
+
+@app.get("/api/logs/{service}")
+@limiter.limit("30/minute")
+async def get_logs_snapshot(request: Request, service: str, lines: int = 200, user: Dict = Depends(require_admin)):
+    """Get a log snapshot for a service."""
+    if service not in _VALID_SERVICES:
+        raise HTTPException(status_code=422, detail=f"Unknown service: {service}")
+    return {"lines": get_log_snapshot(service, lines=lines)}
+
+
+@app.get("/api/logs/{service}/stream")
+async def stream_logs(request: Request, service: str, user: Dict = Depends(require_admin)):
+    """Stream live log lines for a service via SSE."""
+    if service not in _VALID_SERVICES:
+        raise HTTPException(status_code=422, detail=f"Unknown service: {service}")
+
+    async def event_generator():
+        loop = asyncio.get_event_loop()
+        gen = stream_log_lines(service)
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                line = await loop.run_in_executor(None, next, gen)
+                yield {"data": line}
+            except StopIteration:
+                break
+            except Exception as exc:
+                logger.warning("Log stream error for %s: %s", service, exc)
+                break
+
+    return EventSourceResponse(event_generator())
+
+
+# --- Service restart endpoints ---
+
+@app.post("/api/services/{service}/restart")
+@limiter.limit("10/minute")
+async def restart_service(request: Request, service: str, user: Dict = Depends(require_admin)):
+    """Restart a single service or container."""
+    if service not in _VALID_SERVICES or service == "system":
+        raise HTTPException(status_code=422, detail=f"Cannot restart service: {service}")
+
+    user_id = user.get("id", "unknown")
+    ip = request.client.host if request.client else None
+
+    try:
+        if service in _DOCKER_SERVICES:
+            import docker as docker_sdk
+            client = docker_sdk.from_env()
+            name_filter = service.replace("_", "-")
+            matches = client.containers.list(filters={"name": name_filter})
+            if not matches:
+                raise HTTPException(status_code=404, detail=f"Container for {service} not found")
+            matches[0].restart()
+        elif service in _SYSTEMD_SERVICES:
+            unit = _SYSTEMD_SERVICES[service]
+            subprocess.run(["systemctl", "restart", unit], check=True, timeout=30)
+        else:
+            raise HTTPException(status_code=422, detail=f"Cannot restart service: {service}")
+
+        if database:
+            record_audit(database, "service_restarted", user_id=user_id,
+                         details=f"service={service}", ip_address=ip)
+
+        return {"status": "restarted", "service": service}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to restart %s: %s", service, exc)
+        raise HTTPException(status_code=500, detail=f"Restart failed: {exc}")
+
+
+@app.post("/api/services/restart-all")
+@limiter.limit("3/minute")
+async def restart_all_services(request: Request, user: Dict = Depends(require_admin)):
+    """Restart the full Immich stack via docker compose."""
+    if not config:
+        raise HTTPException(status_code=503, detail="Config not initialized")
+
+    compose_path = Path(config.immich.docker_compose_path)
+    user_id = user.get("id", "unknown")
+    ip = request.client.host if request.client else None
+
+    try:
+        subprocess.run(
+            ["docker", "compose", "restart"],
+            cwd=str(compose_path), check=True, capture_output=True, timeout=120,
+        )
+        if database:
+            record_audit(database, "services_restarted_all", user_id=user_id, ip_address=ip)
+        return {"status": "restarted", "service": "all"}
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode() if exc.stderr else ""
+        logger.error("docker compose restart failed: %s", stderr)
+        raise HTTPException(status_code=500, detail=f"docker compose restart failed: {stderr}")
+    except Exception as exc:
+        logger.error("restart-all error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# --- Update status / apply-stream endpoints ---
+
+@app.get("/api/updates/status")
+@limiter.limit("10/minute")
+async def get_update_status(request: Request, user: Dict = Depends(require_admin)):
+    """Return current vs latest Immich version and update history."""
+    if not update_checker:
+        raise HTTPException(status_code=503, detail="Update checker not initialized")
+
+    current = update_checker.get_running_version()
+    latest = update_checker.get_latest_github_version()
+
+    update_available = False
+    changelog_url = None
+    if current and latest:
+        try:
+            update_available = (
+                update_checker._parse_version(latest) > update_checker._parse_version(current)
+            )
+            if update_available:
+                changelog_url = f"https://github.com/immich-app/immich/releases/tag/v{latest}"
+        except (ValueError, TypeError):
+            pass
+
+    history = []
+    if database:
+        history = database.get_update_history(limit=10)
+
+    return {
+        "current_version": current,
+        "latest_version": latest,
+        "update_available": update_available,
+        "changelog_url": changelog_url,
+        "history": history,
+    }
+
+
+# Track in-flight update progress for SSE
+_update_progress: List[Dict[str, str]] = []
+_update_in_progress: bool = False
+
+
+@app.get("/api/updates/apply/stream")
+async def stream_update_progress(request: Request, user: Dict = Depends(require_admin)):
+    """Stream update progress events via SSE."""
+    async def event_generator():
+        sent = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            while sent < len(_update_progress):
+                yield {"data": _update_progress[sent]}
+                sent += 1
+            if not _update_in_progress and sent >= len(_update_progress):
+                break
+            await asyncio.sleep(0.5)
+
+    return EventSourceResponse(event_generator())
 
 
 def main():

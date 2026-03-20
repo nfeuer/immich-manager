@@ -16,3 +16,4 @@ aiosqlite>=0.20.0,<1.0
 slowapi>=0.1.9,<1.0
 sdnotify>=0.3.2,<1.0  # Systemd watchdog heartbeat
 boto3>=1.35.0,<2.0  # For backup verification offsite sync (S3/Backblaze)
+sse-starlette>=1.6.0,<3.0  # Server-Sent Events for log streaming
