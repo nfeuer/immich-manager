@@ -6,10 +6,13 @@ import subprocess
 import os
 import shutil
 import gzip
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class BackupManager:
@@ -27,6 +30,45 @@ class BackupManager:
 
         # Ensure backup directory exists
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+    def _encrypt_file(self, file_path: Path) -> Path:
+        """Encrypt a backup file using age if encryption is enabled.
+        Returns the path to the encrypted file (original is removed)."""
+        enc = getattr(self.config, 'encryption', None)
+        if not enc or not enc.enabled or not enc.public_key:
+            return file_path
+
+        encrypted_path = file_path.with_suffix(file_path.suffix + '.age')
+        try:
+            subprocess.run(
+                ['age', '-r', enc.public_key, '-o', str(encrypted_path), str(file_path)],
+                check=True, capture_output=True
+            )
+            file_path.unlink()
+            logger.info("Backup encrypted: %s", encrypted_path.name)
+            return encrypted_path
+        except FileNotFoundError:
+            logger.warning("'age' not installed — skipping encryption. Install: sudo apt install age")
+            return file_path
+        except subprocess.CalledProcessError as e:
+            logger.error("Encryption failed: %s", e.stderr.decode() if e.stderr else str(e))
+            # Keep the unencrypted file rather than losing the backup
+            if encrypted_path.exists():
+                encrypted_path.unlink()
+            return file_path
+
+    @staticmethod
+    def _decrypt_file(file_path: Path, key_file: str) -> Path:
+        """Decrypt an age-encrypted backup file. Returns path to decrypted file."""
+        if not str(file_path).endswith('.age'):
+            return file_path
+
+        decrypted_path = Path(str(file_path)[:-4])  # strip .age
+        subprocess.run(
+            ['age', '-d', '-i', key_file, '-o', str(decrypted_path), str(file_path)],
+            check=True, capture_output=True
+        )
+        return decrypted_path
 
     def backup_database(self) -> Dict[str, Any]:
         """
@@ -73,6 +115,9 @@ class BackupManager:
                 # Remove uncompressed file
                 backup_file.unlink()
                 backup_file = Path(f"{backup_file}.gz")
+
+            # Encrypt if enabled
+            backup_file = self._encrypt_file(backup_file)
 
             duration = time.time() - start_time
             size_bytes = backup_file.stat().st_size
@@ -155,6 +200,9 @@ class BackupManager:
                 check=True,
                 capture_output=True
             )
+
+            # Encrypt if enabled
+            backup_file = self._encrypt_file(backup_file)
 
             size_bytes = backup_file.stat().st_size
 
@@ -247,6 +295,7 @@ class BackupManager:
             Dictionary with restore status
         """
         start_time = time.time()
+        temp_files = []
 
         try:
             backup_path = Path(backup_file)
@@ -265,16 +314,31 @@ class BackupManager:
             if not container_name:
                 raise Exception("PostgreSQL container not found")
 
+            # Decrypt if needed
+            working_path = backup_path
+            if str(working_path).endswith('.age'):
+                key_file = os.environ.get(
+                    'BACKUP_KEY_FILE', '/etc/immich-ecosystem/backup-key.txt'
+                )
+                if not Path(key_file).exists():
+                    raise FileNotFoundError(
+                        f"Decryption key not found at {key_file}. "
+                        "Set BACKUP_KEY_FILE env var or place key at default path."
+                    )
+                working_path = self._decrypt_file(working_path, key_file)
+                temp_files.append(working_path)
+
             # Decompress if needed
             temp_file = None
-            if backup_file.endswith('.gz'):
-                temp_file = backup_path.with_suffix('')
-                with gzip.open(backup_path, 'rb') as f_in:
+            if str(working_path).endswith('.gz'):
+                temp_file = working_path.with_suffix('')
+                with gzip.open(working_path, 'rb') as f_in:
                     with open(temp_file, 'wb') as f_out:
                         shutil.copyfileobj(f_in, f_out)
                 restore_file = temp_file
+                temp_files.append(temp_file)
             else:
-                restore_file = backup_path
+                restore_file = working_path
 
             # Restore database
             with open(restore_file, 'r') as f:
@@ -288,9 +352,10 @@ class BackupManager:
                     capture_output=True
                 )
 
-            # Clean up temp file
-            if temp_file and temp_file.exists():
-                temp_file.unlink()
+            # Clean up temp files
+            for tf in temp_files:
+                if tf and tf.exists():
+                    tf.unlink()
 
             duration = time.time() - start_time
 
@@ -302,9 +367,10 @@ class BackupManager:
         except Exception as e:
             duration = time.time() - start_time
 
-            # Clean up temp file
-            if temp_file and temp_file.exists():
-                temp_file.unlink()
+            # Clean up temp files
+            for tf in temp_files:
+                if tf and tf.exists():
+                    tf.unlink()
 
             return {
                 'status': 'failed',

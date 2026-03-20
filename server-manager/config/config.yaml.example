@@ -1,5 +1,4 @@
 # Immich Server Manager Configuration
-# https://houseoffeuer.com  |  Discord: House of Feuer
 
 server:
   host: "127.0.0.1"  # Use "0.0.0.0" only if you need LAN access and have a reverse proxy/firewall
@@ -123,7 +122,7 @@ alerts:
   discord:
     enabled: false
     webhook_url: "${DISCORD_WEBHOOK_URL:-}"  # Discord channel webhook URL
-    bot_name: "House of Feuer"              # Display name in Discord
+    bot_name: "Immich Manager"              # Display name in Discord
     server_name: ""                          # Optional: label for this server
   quiet_hours:
     enabled: true

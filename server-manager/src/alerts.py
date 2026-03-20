@@ -75,7 +75,7 @@ class AlertManager:
                     <hr>
                     <pre>{body}</pre>
                     <p style="color:#888;font-size:12px">
-                        House of Feuer &mdash; <a href="https://houseoffeuer.com">houseoffeuer.com</a>
+                        Immich Manager
                     </p>
                 </body>
             </html>
@@ -141,7 +141,7 @@ class AlertManager:
             return False
 
         try:
-            bot_name = discord_cfg.bot_name or "House of Feuer"
+            bot_name = discord_cfg.bot_name or "Immich Manager"
             server_label = discord_cfg.server_name or "Immich Server"
 
             payload = {
@@ -156,7 +156,7 @@ class AlertManager:
                         {"name": "Server", "value": server_label, "inline": True},
                     ],
                     "footer": {
-                        "text": "House of Feuer | houseoffeuer.com",
+                        "text": "Immich Manager",
                     },
                 }],
             }

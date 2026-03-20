@@ -3,17 +3,30 @@ Description=Photo Curator Assistant
 After=network.target
 
 [Service]
-Type=simple
-User=root
+Type=notify
+User=immich-mgr
+Group=immich-mgr
 WorkingDirectory=/opt/photo-curator
 Environment="PATH=/opt/photo-curator/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/opt/photo-curator/venv/bin/python -m uvicorn src.main:app --host 127.0.0.1 --port 8081
+EnvironmentFile=-/etc/immich-ecosystem/secrets.env
+ExecStart=/opt/photo-curator/venv/bin/python -m uvicorn src.main:app --host 127.0.0.1 --port 8081 --workers 2
 Restart=always
 RestartSec=10
+WatchdogSec=60
 
-# Security settings
+# Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/photo-curator /var/log/immich-ecosystem
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
 
 # Logging
 StandardOutput=journal

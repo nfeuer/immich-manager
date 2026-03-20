@@ -92,7 +92,7 @@ class DiscordConfig(BaseModel):
     """Discord webhook alert configuration"""
     enabled: bool = False
     webhook_url: str = ""
-    bot_name: str = "House of Feuer"
+    bot_name: str = "Immich Manager"
     server_name: str = ""  # Optional: your server's display name
 
 

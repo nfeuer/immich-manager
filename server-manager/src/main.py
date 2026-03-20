@@ -81,6 +81,22 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    """Block cross-origin state-changing requests (CSRF protection).
+    Safe methods (GET, HEAD, OPTIONS) and Bearer-token requests are exempt."""
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        # Bearer token requests are not vulnerable to CSRF
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            origin = request.headers.get("Origin") or request.headers.get("Referer", "")
+            allowed = _get_allowed_origins()
+            if origin and not any(origin.startswith(o) for o in allowed):
+                logger.warning("CSRF blocked: origin=%s not in %s", origin, allowed)
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin request blocked"})
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to every response."""
     response = await call_next(request)
@@ -671,8 +687,8 @@ async def check_immich_update(request: Request, user: Dict = Depends(require_adm
 
 @app.get("/metrics", response_class=PlainTextResponse)
 @limiter.limit("30/minute")
-async def prometheus_metrics(request: Request):
-    """Prometheus-compatible metrics endpoint (no auth — restrict via firewall)."""
+async def prometheus_metrics(request: Request, user: Dict = Depends(require_auth)):
+    """Prometheus-compatible metrics endpoint. Requires auth (Immich token or Bearer)."""
     body = generate_metrics(system_monitor, docker_monitor, disk_monitor, database)
     return PlainTextResponse(body, media_type="text/plain; version=0.0.4; charset=utf-8")
 

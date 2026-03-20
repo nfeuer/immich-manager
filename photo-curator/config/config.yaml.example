@@ -1,5 +1,4 @@
 # Photo Curator Configuration
-# https://houseoffeuer.com  |  Discord: House of Feuer
 
 server:
   host: "127.0.0.1"  # Use "0.0.0.0" only if you need LAN access and have a reverse proxy/firewall

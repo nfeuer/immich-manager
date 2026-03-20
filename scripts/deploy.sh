@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Automated deployment script for Immich Manager
-# https://houseoffeuer.com  |  Discord: House of Feuer
+# Automated deployment for Immich Ecosystem
 #
 # Usage:
 #   sudo ./scripts/deploy.sh                     # Update everything
@@ -103,7 +103,7 @@ service_active() {
 # ── Preflight ────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}╔════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║   House of Feuer — Deploy              ║${NC}"
+echo -e "${BOLD}║   Immich Ecosystem — Deploy            ║${NC}"
 echo -e "${BOLD}╚════════════════════════════════════════╝${NC}"
 echo ""
 log "Timestamp:  ${TIMESTAMP}"
@@ -150,6 +150,7 @@ if [ "$ROLLBACK" = true ]; then
             cd "$REPO_DIR"
             git checkout "$sha" -- "${svc}/"
             cp -r "${REPO_DIR}/${svc}/"* "$install_dir/"
+            chown -R immich-mgr:immich-mgr "$install_dir/"
             log "Code rolled back to ${sha:0:8}"
         fi
 
@@ -235,8 +236,9 @@ for svc in "${SERVICES[@]}"; do
         photo-curator)  install_dir="$PC_INSTALL" ;;
     esac
 
-    # Copy new source files
+    # Copy new source files and fix ownership
     cp -r "${REPO_DIR}/${svc}/"* "${install_dir}/"
+    chown -R immich-mgr:immich-mgr "${install_dir}/"
     log "  ${svc}: files synced"
 
     # Install/update deps

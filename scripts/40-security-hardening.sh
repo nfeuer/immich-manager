@@ -75,9 +75,8 @@ if ! sudo ufw status | grep -q "Status: active"; then
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
 
-    # Allow SSH (standard port 22 and non-standard 2222)
-    sudo ufw allow 22/tcp
-    sudo ufw allow 2222/tcp
+    # Allow SSH (important!)
+    sudo ufw allow ssh
 
     # Allow local network
     LOCAL_SUBNET=$(ip route | grep default | awk '{print $3}' | cut -d. -f1-3).0/24
@@ -92,6 +91,71 @@ else
 fi
 
 mark_step_complete "phase4_security" "configure_ufw"
+
+# Harden SSH configuration
+echo ""
+echo "Hardening SSH..."
+mark_step_start "phase4_security" "harden_ssh"
+
+SSHD_DROP_IN="/etc/ssh/sshd_config.d/99-immich-hardening.conf"
+
+# Use a drop-in file to avoid clobbering the main sshd_config
+sudo tee "$SSHD_DROP_IN" > /dev/null <<'EOF'
+# Immich Ecosystem SSH hardening
+# Applied by 40-security-hardening.sh
+
+# Disable root login via SSH
+PermitRootLogin no
+
+# Disable password authentication (use SSH keys only)
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+
+# Disable empty passwords
+PermitEmptyPasswords no
+
+# Limit authentication attempts per connection
+MaxAuthTries 3
+
+# Disconnect idle sessions after 15 minutes
+ClientAliveInterval 300
+ClientAliveCountMax 3
+
+# Disable X11 forwarding (not needed for a server)
+X11Forwarding no
+EOF
+
+# Verify the user has an SSH key before we disable password auth
+if [ -f "$HOME/.ssh/authorized_keys" ] && [ -s "$HOME/.ssh/authorized_keys" ]; then
+    echo -e "${GREEN}✓${NC} SSH key found for user $USER"
+    # Test that the config is valid before restarting
+    if sudo sshd -t 2>/dev/null; then
+        sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null
+        echo -e "${GREEN}✓${NC} SSH hardened: root login disabled, password auth disabled"
+    else
+        echo -e "${RED}✗${NC} SSH config validation failed — reverting"
+        sudo rm -f "$SSHD_DROP_IN"
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} No SSH key found for $USER."
+    echo ""
+    echo "   You MUST add an SSH key before password auth can be disabled."
+    echo "   On your local machine, run:"
+    echo "     ssh-keygen -t ed25519"
+    echo "     ssh-copy-id $USER@$(hostname -I | awk '{print $1}')"
+    echo ""
+    echo "   Then re-run this script to complete SSH hardening."
+    echo ""
+    # Still apply everything except PasswordAuthentication
+    sudo sed -i 's/^PasswordAuthentication no/# PasswordAuthentication no  # UNCOMMENT after adding SSH key/' "$SSHD_DROP_IN"
+    sudo sed -i 's/^KbdInteractiveAuthentication no/# KbdInteractiveAuthentication no/' "$SSHD_DROP_IN"
+    if sudo sshd -t 2>/dev/null; then
+        sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null
+        echo -e "${YELLOW}⚠${NC} SSH partially hardened (root login disabled, password auth still on)"
+    fi
+fi
+
+mark_step_complete "phase4_security" "harden_ssh"
 
 # 2FA reminder
 echo ""
@@ -193,9 +257,13 @@ Security Checklist
 Initial Setup:
 [✓] fail2ban installed and configured
 [✓] UFW firewall enabled
+[✓] SSH hardened (root login disabled)
+[✓] Automatic security updates enabled
+[ ] SSH key-only auth verified (check /etc/ssh/sshd_config.d/99-immich-hardening.conf)
 [ ] 2FA enabled for all Immich users
 [ ] Strong passwords set (use password manager)
 [ ] Recovery codes saved securely
+[ ] Cloudflare Access policy configured (see below)
 
 Weekly Tasks:
 [ ] Review security logs: /opt/immich-ecosystem/scripts/security-monitor.sh
@@ -222,6 +290,16 @@ If Compromised:
 5. Review and remove suspicious content
 6. Restore from backup if needed
 
+Cloudflare Access (Recommended):
+Add a zero-trust access policy to protect the management dashboards:
+1. Go to https://one.dash.cloudflare.com/
+2. Navigate to Access → Applications → Add an Application
+3. Create a self-hosted app:
+   - Application domain: yourdomain.com, Path: /monitor/*
+   - Add another rule for: yourdomain.com, Path: /curator/*
+4. Set policy: "Allow" with email one-time pin (your email only)
+This adds a second layer of auth before anyone even reaches the dashboards.
+
 Support:
 - Security monitor: /opt/immich-ecosystem/scripts/security-monitor.sh
 - Logs: /var/log/immich-ecosystem/
@@ -242,14 +320,18 @@ echo ""
 echo "Security features enabled:"
 echo "  ✓ fail2ban - Blocks brute force attacks"
 echo "  ✓ UFW firewall - Restricts network access"
+echo "  ✓ SSH hardened - Root login disabled, key-only recommended"
 echo "  ✓ Security monitoring - Track suspicious activity"
 echo "  ⚠ 2FA - MUST be enabled for all users!"
 echo ""
 echo "Security checklist: /opt/immich-ecosystem/security-checklist.txt"
+echo "SSH hardening:      /etc/ssh/sshd_config.d/99-immich-hardening.conf"
 echo "Monitor security:   /opt/immich-ecosystem/scripts/security-monitor.sh"
 echo ""
 echo "Next steps:"
-echo "  1. Enable 2FA for ALL users (critical!)"
-echo "  2. Test remote access from your phone"
-echo "  3. Run security monitor: /opt/immich-ecosystem/scripts/security-monitor.sh"
+echo "  1. Add your SSH key (if not done) and verify key-only login"
+echo "  2. Enable 2FA for ALL Immich users (critical!)"
+echo "  3. Set up Cloudflare Access policy (see security checklist)"
+echo "  4. Test remote access from your phone"
+echo "  5. Run security monitor: /opt/immich-ecosystem/scripts/security-monitor.sh"
 echo ""
