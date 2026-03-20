@@ -80,6 +80,95 @@ You'll paste this API key into the config files in the next section.
 
 ---
 
+## 🎮 GPU Acceleration (NVIDIA)
+
+If your system has an NVIDIA GPU, you can enable hardware-accelerated video transcoding and ML inference in Immich. This significantly speeds up face recognition, CLIP embeddings, and video transcoding compared to CPU-only mode.
+
+### Prerequisites: NVIDIA Container Toolkit
+
+Docker needs the NVIDIA Container Toolkit to access the GPU. Install it on Ubuntu/Debian:
+
+```bash
+# Add the NVIDIA Container Toolkit repository
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+# Install
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+
+# Configure Docker to use it
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+Verify the GPU is accessible from Docker:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi
+```
+
+You should see your GPU listed in the output.
+
+### Using the Immich Manager Docker Setup (Recommended)
+
+If you're using the `docker/immich.yml` file from this repo, GPU support is already configured. The `immich-ml` service has a `deploy:` block that assigns a GPU via the `IMMICH_ML_GPU_ID` variable in `docker/.env`:
+
+```bash
+# In docker/.env
+IMMICH_ML_GPU_ID=0    # GPU index (run nvidia-smi to find yours)
+```
+
+For CPU-only mode, comment out the entire `deploy:` block in `docker/immich.yml`. See [docs/DOCKER.md](docs/DOCKER.md) for details on GPU assignment.
+
+### Using the Official Immich Docker Compose
+
+If you're using the official `docker-compose.yml` from the Immich release directly, enable GPU acceleration by making these changes:
+
+**1. Video transcoding (immich-server)** — uncomment and set to `nvenc`:
+
+```yaml
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-release}
+    extends:
+      file: hwaccel.transcoding.yml
+      service: nvenc  # NVIDIA GPU transcoding
+```
+
+**2. ML inference (immich-machine-learning)** — add `-cuda` to the image tag and uncomment the extends block:
+
+```yaml
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-release}-cuda
+    extends:
+      file: hwaccel.ml.yml
+      service: cuda  # NVIDIA CUDA inference
+```
+
+**3. Download the hardware acceleration files** — these must be in the same directory as your `docker-compose.yml`:
+
+```bash
+curl -L -o hwaccel.ml.yml https://github.com/immich-app/immich/releases/latest/download/hwaccel.ml.yml
+curl -L -o hwaccel.transcoding.yml https://github.com/immich-app/immich/releases/latest/download/hwaccel.transcoding.yml
+```
+
+### Supported Hardware Acceleration Options
+
+| Hardware | Transcoding (`hwaccel.transcoding.yml`) | ML Inference (`hwaccel.ml.yml`) |
+|----------|----------------------------------------|--------------------------------|
+| NVIDIA GPU (GTX/RTX) | `nvenc` | `cuda` |
+| Intel Quick Sync | `quicksync` | `openvino` |
+| AMD/ATI (ROCm) | `vaapi` | `rocm` |
+| Rockchip NPU | `rkmpp` | `rknn` |
+| ARM NN | — | `armnn` |
+| CPU (default) | `cpu` | `cpu` |
+
+---
+
 ## 🔧 Prerequisite Setup Steps
 
 Complete these before running the install scripts.
