@@ -3,6 +3,8 @@ import Header from './components/Header.jsx'
 import SystemStatusCard from './components/SystemStatusCard.jsx'
 import ImmichStatusCard from './components/ImmichStatusCard.jsx'
 import AlertsPanel from './components/AlertsPanel.jsx'
+import DiskHealthCard from './components/DiskHealthCard.jsx'
+import BackupsCard from './components/BackupsCard.jsx'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -40,7 +42,8 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
             <SystemStatusCard />
             <ImmichStatusCard />
-            {/* remaining cards added in later tasks */}
+            <DiskHealthCard />
+            <BackupsCard />
           </div>
           <AlertsPanel />
         </div>
