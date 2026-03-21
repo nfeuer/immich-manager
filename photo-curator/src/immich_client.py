@@ -381,7 +381,7 @@ class ImmichClient:
             True if connected
         """
         try:
-            response = self.session.get(f"{self.api_url}/server-info/ping")
+            response = self.session.get(f"{self.api_url}/server/ping")
             response.raise_for_status()
             return True
         except Exception as e:

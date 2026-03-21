@@ -10,7 +10,7 @@ Group=immich-mgr
 WorkingDirectory=/opt/immich-server-manager
 Environment="PATH=/opt/immich-server-manager/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EnvironmentFile=-/etc/immich-ecosystem/secrets.env
-ExecStart=/opt/immich-server-manager/venv/bin/python -m uvicorn src.main:app --host 127.0.0.1 --port 8080 --workers 2
+ExecStart=/opt/immich-server-manager/venv/bin/python -m uvicorn src.main:app --host 127.0.0.1 --port 8080
 Restart=always
 RestartSec=10
 WatchdogSec=60

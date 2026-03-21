@@ -5,6 +5,7 @@ System monitoring functions for disk health, system metrics, and Docker containe
 import subprocess
 import psutil
 import docker
+from .utils import CLEAN_ENV
 import json
 import re
 from typing import Dict, List, Optional, Any
@@ -26,7 +27,7 @@ class DiskMonitor:
     def check_smart_available(self) -> bool:
         """Check if smartctl is available"""
         try:
-            subprocess.run(['smartctl', '--version'], capture_output=True, check=True)
+            subprocess.run(['smartctl', '--version'], capture_output=True, check=True, env=CLEAN_ENV)
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
@@ -54,7 +55,8 @@ class DiskMonitor:
                 ['sudo', 'smartctl', '-a', '-j', device],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                env=CLEAN_ENV,
             )
 
             if result.returncode not in [0, 4]:  # 4 means some SMART data available
@@ -73,7 +75,7 @@ class DiskMonitor:
                 'model': data.get('model_name', 'Unknown'),
                 'serial': data.get('serial_number', 'Unknown'),
                 'capacity': data.get('user_capacity', {}).get('bytes', 0),
-                'temperature': None,
+                'temperature': data.get('temperature', {}).get('current'),
                 'power_on_hours': None,
                 'power_cycle_count': None,
                 'reallocated_sectors': 0,
@@ -83,7 +85,8 @@ class DiskMonitor:
                 'warnings': []
             }
 
-            # Parse SMART attributes
+            # Parse SMART attributes (skip temperature — raw.value packs min/max/trip
+            # into one integer giving absurd values; top-level temperature.current is used instead)
             attrs = data.get('ata_smart_attributes', {}).get('table', [])
             for attr in attrs:
                 attr_id = attr.get('id')
@@ -91,7 +94,7 @@ class DiskMonitor:
                 raw_value = attr.get('raw', {}).get('value', 0)
 
                 if attr_id == 194 or 'Temperature' in attr_name:
-                    health['temperature'] = raw_value
+                    pass  # handled via data['temperature']['current'] above
                 elif attr_id == 9 or 'Power_On_Hours' in attr_name:
                     health['power_on_hours'] = raw_value
                 elif attr_id == 12 or 'Power_Cycle_Count' in attr_name:

@@ -9,6 +9,7 @@ import subprocess
 from typing import Generator, List
 
 import docker
+from .utils import CLEAN_ENV
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ def _journal_snapshot(unit: str | None, lines: int) -> List[str]:
     if unit:
         cmd += ["-u", unit]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=CLEAN_ENV)
         return result.stdout.splitlines()
     except Exception as exc:
         logger.warning("journalctl snapshot failed (unit=%s): %s", unit, exc)
@@ -109,7 +110,7 @@ def _journal_stream(unit: str | None) -> Generator[str, None, None]:
     if unit:
         cmd += ["-u", unit]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=CLEAN_ENV)
         for line in proc.stdout:
             yield line.rstrip("\n")
     except Exception as exc:

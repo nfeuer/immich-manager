@@ -3,10 +3,10 @@ Backup management for Immich database and files
 """
 
 import subprocess
-import os
 import shutil
 import gzip
 import logging
+from .utils import CLEAN_ENV
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -42,7 +42,7 @@ class BackupManager:
         try:
             subprocess.run(
                 ['age', '-r', enc.public_key, '-o', str(encrypted_path), str(file_path)],
-                check=True, capture_output=True
+                check=True, capture_output=True, env=CLEAN_ENV,
             )
             file_path.unlink()
             logger.info("Backup encrypted: %s", encrypted_path.name)
@@ -66,7 +66,7 @@ class BackupManager:
         decrypted_path = Path(str(file_path)[:-4])  # strip .age
         subprocess.run(
             ['age', '-d', '-i', key_file, '-o', str(decrypted_path), str(file_path)],
-            check=True, capture_output=True
+            check=True, capture_output=True, env=CLEAN_ENV,
         )
         return decrypted_path
 
@@ -87,7 +87,8 @@ class BackupManager:
                 ['docker', 'ps', '--filter', 'name=postgres', '--format', '{{.Names}}'],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                env=CLEAN_ENV,
             )
             container_name = result.stdout.strip().split('\n')[0]
 
@@ -103,7 +104,8 @@ class BackupManager:
                     ],
                     stdout=f,
                     stderr=subprocess.PIPE,
-                    check=True
+                    check=True,
+                    env=CLEAN_ENV,
                 )
 
             # Compress if enabled
@@ -198,7 +200,8 @@ class BackupManager:
                     '.env'
                 ],
                 check=True,
-                capture_output=True
+                capture_output=True,
+                env=CLEAN_ENV,
             )
 
             # Encrypt if enabled
@@ -307,7 +310,8 @@ class BackupManager:
                 ['docker', 'ps', '--filter', 'name=postgres', '--format', '{{.Names}}'],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                env=CLEAN_ENV,
             )
             container_name = result.stdout.strip().split('\n')[0]
 
@@ -349,7 +353,8 @@ class BackupManager:
                     ],
                     stdin=f,
                     check=True,
-                    capture_output=True
+                    capture_output=True,
+                    env=CLEAN_ENV,
                 )
 
             # Clean up temp files

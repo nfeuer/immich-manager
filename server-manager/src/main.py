@@ -17,6 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+import json
 import uvicorn
 import asyncio
 import subprocess
@@ -38,6 +39,7 @@ from .prometheus import generate_metrics
 from .audit import ensure_audit_table, record_audit, get_audit_log
 from .logging_config import setup_json_logging
 from .logs import get_log_snapshot, stream_log_lines
+from .utils import CLEAN_ENV
 from shared.auth import (
     Role, ensure_users_table, get_or_create_user, require_role,
     get_all_users, update_user_role, extract_token, validate_immich_token,
@@ -664,8 +666,11 @@ async def check_immich_update(request: Request, user: Dict = Depends(require_adm
     if not update_checker:
         raise HTTPException(status_code=503, detail="Update checker not initialized")
 
-    running = update_checker.get_running_version()
-    latest = update_checker.get_latest_github_version()
+    loop = asyncio.get_running_loop()
+    running, latest = await asyncio.gather(
+        loop.run_in_executor(None, update_checker.get_running_version),
+        loop.run_in_executor(None, update_checker.get_latest_github_version),
+    )
 
     result = {
         "running_version": running,
@@ -969,16 +974,21 @@ async def apply_update(
 ):
     """
     Manually trigger an update to the latest available Immich version.
-    Takes a snapshot first; rolls back automatically on health-check failure.
+    With auto_updater enabled: takes a snapshot first and rolls back on failure.
+    Without auto_updater: runs docker compose pull && up -d directly.
     """
-    if not auto_updater or not update_checker:
-        raise HTTPException(status_code=503, detail="Auto-updater not enabled in config")
+    if not update_checker:
+        raise HTTPException(status_code=503, detail="Update checker not initialized")
 
-    latest = update_checker.get_latest_github_version()
+    loop = asyncio.get_running_loop()
+    running, latest = await asyncio.gather(
+        loop.run_in_executor(None, update_checker.get_running_version),
+        loop.run_in_executor(None, update_checker.get_latest_github_version),
+    )
+
     if not latest:
         raise HTTPException(status_code=503, detail="Could not fetch latest Immich version from GitHub")
 
-    running = update_checker.get_running_version()
     if running == latest:
         return {"status": "up_to_date", "version": running}
 
@@ -986,51 +996,110 @@ async def apply_update(
                  details=f"target_version={latest}",
                  ip_address=request.client.host if request.client else None)
 
-    import json as _json
+    def _emit(step: str, message: str) -> None:
+        _update_progress.append(json.dumps({"step": step, "message": message}))
 
-    async def _run():
-        global _update_progress, _update_in_progress
-        _update_progress = []
-        _update_in_progress = True
+    if auto_updater:
+        # Full update with snapshot + auto-rollback
+        async def _run_with_snapshot():
+            global _update_progress, _update_in_progress
+            _update_progress = []
+            _update_in_progress = True
 
-        def _emit(step: str, message: str):
-            _update_progress.append(_json.dumps({"step": step, "message": message}))
+            _emit("snapshot", "Creating pre-update snapshot...")
+            result = await asyncio.get_running_loop().run_in_executor(
+                None, auto_updater.apply_update, latest
+            )
+            logger.info(f"Manual update result: {result}")
 
-        _emit("snapshot", "Creating pre-update snapshot...")
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, auto_updater.apply_update, latest
-        )
-        logger.info(f"Manual update result: {result}")
-
-        if result["status"] == "success":
-            _emit("done", f"Updated to v{result['to_version']} successfully")
-        else:
-            if result.get("rolled_back"):
-                _emit("rolled_back", f"Update failed and was rolled back: {result.get('error')}")
-            else:
-                _emit("error", f"Update failed: {result.get('error')}")
-
-        _update_in_progress = False
-
-        if alert_manager:
             if result["status"] == "success":
+                _emit("done", f"Updated to v{result['to_version']} successfully")
+            else:
+                if result.get("rolled_back"):
+                    _emit("rolled_back", f"Update failed and was rolled back: {result.get('error')}")
+                else:
+                    _emit("error", f"Update failed: {result.get('error')}")
+
+            _update_in_progress = False
+
+            if alert_manager:
+                if result["status"] == "success":
+                    await alert_manager.send_alert(
+                        "Immich Updated",
+                        f"Immich updated from v{result['from_version']} to v{result['to_version']}",
+                        "info",
+                    )
+                else:
+                    msg = f"Immich update to v{latest} failed: {result.get('error')}"
+                    if result.get("rolled_back"):
+                        msg += " (automatically rolled back)"
+                    await alert_manager.send_alert("Immich Update Failed", msg, "critical")
+
+        background_tasks.add_task(_run_with_snapshot)
+        return {
+            "status": "started",
+            "message": f"Update to v{latest} started in background (snapshot will be taken first)",
+            "target_version": latest,
+        }
+
+    else:
+        # Simple update: docker compose pull && up -d (no snapshot)
+        if not config:
+            raise HTTPException(status_code=503, detail="Config not initialized")
+        compose_path = Path(config.immich.docker_compose_path)
+
+        async def _run_simple():
+            global _update_progress, _update_in_progress
+            _update_progress = []
+            _update_in_progress = True
+            loop = asyncio.get_running_loop()
+
+            _emit("pull", f"Pulling latest Immich images (v{latest})...")
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        ["docker", "compose", "pull"],
+                        cwd=str(compose_path), check=True,
+                        capture_output=True, timeout=300, env=CLEAN_ENV,
+                    )
+                )
+            except Exception as e:
+                _emit("error", f"docker compose pull failed: {e}")
+                _update_in_progress = False
+                return
+
+            _emit("restart", "Restarting containers with new images...")
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        ["docker", "compose", "up", "-d", "--remove-orphans"],
+                        cwd=str(compose_path), check=True,
+                        capture_output=True, timeout=120, env=CLEAN_ENV,
+                    )
+                )
+            except Exception as e:
+                _emit("error", f"docker compose up failed: {e}")
+                _update_in_progress = False
+                return
+
+            _emit("done", f"Update to v{latest} applied successfully")
+            _update_in_progress = False
+
+            if alert_manager:
                 await alert_manager.send_alert(
                     "Immich Updated",
-                    f"Immich updated from v{result['from_version']} to v{result['to_version']}",
+                    f"Immich updated to v{latest} via docker compose pull",
                     "info",
                 )
-            else:
-                msg = f"Immich update to v{latest} failed: {result.get('error')}"
-                if result.get("rolled_back"):
-                    msg += " (automatically rolled back)"
-                await alert_manager.send_alert("Immich Update Failed", msg, "critical")
 
-    background_tasks.add_task(_run)
-    return {
-        "status": "started",
-        "message": f"Update to v{latest} started in background (snapshot will be taken first)",
-        "target_version": latest,
-    }
+        background_tasks.add_task(_run_simple)
+        return {
+            "status": "started",
+            "message": f"Update to v{latest} started in background",
+            "target_version": latest,
+        }
 
 
 # --- Valid service identifiers ---
@@ -1061,7 +1130,7 @@ async def stream_logs(request: Request, service: str, user: Dict = Depends(requi
         raise HTTPException(status_code=422, detail=f"Unknown service: {service}")
 
     async def event_generator():
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         gen = stream_log_lines(service)
         while True:
             if await request.is_disconnected():
@@ -1101,7 +1170,7 @@ async def restart_service(request: Request, service: str, user: Dict = Depends(r
             matches[0].restart()
         elif service in _SYSTEMD_SERVICES:
             unit = _SYSTEMD_SERVICES[service]
-            subprocess.run(["systemctl", "restart", unit], check=True, timeout=30)
+            subprocess.run(["systemctl", "restart", unit], check=True, timeout=30, env=CLEAN_ENV)
         else:
             raise HTTPException(status_code=422, detail=f"Cannot restart service: {service}")
 
@@ -1132,7 +1201,7 @@ async def restart_all_services(request: Request, user: Dict = Depends(require_ad
     try:
         subprocess.run(
             ["docker", "compose", "restart"],
-            cwd=str(compose_path), check=True, capture_output=True, timeout=120,
+            cwd=str(compose_path), check=True, capture_output=True, timeout=120, env=CLEAN_ENV,
         )
         if database:
             record_audit(database, "services_restarted_all", user_id=user_id, ip_address=ip)
@@ -1155,8 +1224,11 @@ async def get_update_status(request: Request, user: Dict = Depends(require_admin
     if not update_checker:
         raise HTTPException(status_code=503, detail="Update checker not initialized")
 
-    current = update_checker.get_running_version()
-    latest = update_checker.get_latest_github_version()
+    loop = asyncio.get_running_loop()
+    current, latest = await asyncio.gather(
+        loop.run_in_executor(None, update_checker.get_running_version),
+        loop.run_in_executor(None, update_checker.get_latest_github_version),
+    )
 
     update_available = False
     changelog_url = None

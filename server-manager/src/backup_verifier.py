@@ -6,6 +6,7 @@ Ensures backups are restorable and valid
 import hashlib
 import subprocess
 import tempfile
+from .utils import CLEAN_ENV
 import shutil
 import boto3
 import logging
@@ -145,7 +146,8 @@ class BackupVerifier:
                 ['docker', 'ps', '--filter', 'name=postgres', '--format', '{{.Names}}'],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                env=CLEAN_ENV,
             )
             container_name = container_result.stdout.strip().split('\n')[0]
 
@@ -157,7 +159,8 @@ class BackupVerifier:
                 ['docker', 'exec', container_name, 'psql', '-U', 'postgres', '-c',
                  f'CREATE DATABASE {temp_db_name}'],
                 check=True,
-                capture_output=True
+                capture_output=True,
+                env=CLEAN_ENV,
             )
 
             # Decompress if needed
@@ -179,7 +182,8 @@ class BackupVerifier:
                     stdin=f,
                     check=True,
                     capture_output=True,
-                    timeout=300  # 5 minute timeout
+                    timeout=300,  # 5 minute timeout
+                    env=CLEAN_ENV,
                 )
 
             # Verify restored database
@@ -188,7 +192,8 @@ class BackupVerifier:
                  '-c', 'SELECT COUNT(*) FROM users'],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                env=CLEAN_ENV,
             )
 
             # Extract user count from output
@@ -208,7 +213,8 @@ class BackupVerifier:
                 ['docker', 'exec', container_name, 'psql', '-U', 'postgres', '-c',
                  f'DROP DATABASE {temp_db_name}'],
                 check=True,
-                capture_output=True
+                capture_output=True,
+                env=CLEAN_ENV,
             )
 
             duration = (datetime.now() - start_time).total_seconds()
@@ -242,7 +248,8 @@ class BackupVerifier:
                     subprocess.run(
                         ['docker', 'exec', container_name, 'psql', '-U', 'postgres', '-c',
                          f'DROP DATABASE IF EXISTS {temp_db_name}'],
-                        capture_output=True
+                        capture_output=True,
+                        env=CLEAN_ENV,
                     )
             except Exception:
                 pass

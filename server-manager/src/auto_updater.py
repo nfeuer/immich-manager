@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
+from .utils import CLEAN_ENV
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ class AutoUpdater:
         """Run pg_dump inside the postgres container and gzip the output."""
         result = subprocess.run(
             ["docker", "ps", "--filter", "name=postgres", "--format", "{{.Names}}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, env=CLEAN_ENV,
         )
         container = result.stdout.strip().split("\n")[0]
         if not container:
@@ -130,7 +131,7 @@ class AutoUpdater:
 
         proc = subprocess.run(
             ["docker", "exec", container, "pg_dump", "-U", "postgres", "immich"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, env=CLEAN_ENV,
         )
         with gzip.open(dest, "wb") as gz_out:
             gz_out.write(proc.stdout)
@@ -179,7 +180,7 @@ class AutoUpdater:
             subprocess.run(
                 ["docker", "compose", "pull"],
                 cwd=str(compose_path), check=True,
-                capture_output=True, timeout=300,
+                capture_output=True, timeout=300, env=CLEAN_ENV,
             )
         except Exception as e:
             error = f"docker compose pull failed: {e}"
@@ -195,7 +196,7 @@ class AutoUpdater:
             subprocess.run(
                 ["docker", "compose", "up", "-d", "--remove-orphans"],
                 cwd=str(compose_path), check=True,
-                capture_output=True, timeout=120,
+                capture_output=True, timeout=120, env=CLEAN_ENV,
             )
         except Exception as e:
             error = f"docker compose up failed: {e}"
