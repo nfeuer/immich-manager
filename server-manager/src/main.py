@@ -526,21 +526,11 @@ async def snapshot_cleanup_job():
 # API Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, user: Dict = Depends(require_admin)):
-    """Serve dashboard HTML (admin only)"""
-    dashboard_path = Path(__file__).parent.parent / "static" / "dashboard.html"
-    if dashboard_path.exists():
-        return dashboard_path.read_text()
-    else:
-        return """
-        <html>
-            <head><title>Immich Server Manager</title></head>
-            <body>
-                <h1>Immich Server Manager</h1>
-                <p>Dashboard coming soon...</p>
-                <p>API Documentation: <a href="/docs">/docs</a></p>
-            </body>
-        </html>
-        """
+    """Serve React dashboard (admin only)"""
+    index_path = Path(__file__).parent.parent / "frontend" / "dist" / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=503, detail="Dashboard not built. Run: cd frontend && npm run build")
+    return index_path.read_text()
 
 
 @app.get("/health")
@@ -1276,6 +1266,13 @@ async def stream_update_progress(request: Request, user: Dict = Depends(require_
             await asyncio.sleep(0.5)
 
     return EventSourceResponse(event_generator())
+
+
+app.mount(
+    "/assets",
+    StaticFiles(directory=Path(__file__).parent.parent / "frontend" / "dist" / "assets"),
+    name="assets",
+)
 
 
 def main():
