@@ -21,7 +21,7 @@ export default function AlertsPanel() {
       <div className="space-y-2">
         {alerts.map((alert, i) => (
           <div
-            key={i}
+            key={`${alert.timestamp}-${alert.category}-${i}`}
             className={`px-3 py-2.5 rounded-lg border text-sm ${SEVERITY_STYLES[alert.severity] ?? SEVERITY_STYLES.info}`}
           >
             <span className="font-semibold">{alert.category}:</span> {alert.message}

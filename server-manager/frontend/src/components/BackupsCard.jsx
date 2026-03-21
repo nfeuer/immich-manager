@@ -52,7 +52,7 @@ export default function BackupsCard() {
         </div>
       )}
       <button
-        onClick={triggerBackup}
+        onClick={() => { triggerBackup() }}
         className="mt-auto w-full px-4 py-2 bg-immich-primary hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors duration-150 flex items-center justify-center gap-2"
       >
         <ArchiveBoxIcon className="w-4 h-4" />
