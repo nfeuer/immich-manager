@@ -2,12 +2,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+from src.auth import get_current_user
 from src.main import app
 
 FAKE_USER = {
@@ -38,7 +33,6 @@ def _auth_override():
 
 def test_raw_photos_returns_list():
     app.dependency_overrides = {}
-    from src.auth import get_current_user
     app.dependency_overrides[get_current_user] = _auth_override
 
     with patch("src.main.ImmichClient") as MockClient:
@@ -66,7 +60,6 @@ def test_raw_photos_requires_auth():
 
 
 def test_raw_photos_empty_month():
-    from src.auth import get_current_user
     app.dependency_overrides[get_current_user] = _auth_override
 
     with patch("src.main.ImmichClient") as MockClient:

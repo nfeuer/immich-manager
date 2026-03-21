@@ -765,7 +765,9 @@ async def get_monthly_photos(
 
 
 @app.get("/api/photos/{year}/{month}/raw")
+@limiter.limit("30/minute")
 async def get_raw_photos(
+    request: Request,
     year: int,
     month: int,
     current_user: Dict = Depends(get_current_user),
@@ -773,7 +775,9 @@ async def get_raw_photos(
     """Fetch photos for a month directly from Immich, no analysis required."""
     immich_api_url = app.state.immich_api_url
     user_client = ImmichClient(immich_api_url, current_user["access_token"], use_bearer=True)
-    photos = user_client.get_user_photos(current_user["id"], year, month)
+    photos = await asyncio.to_thread(
+        user_client.get_user_photos, current_user["id"], year, month
+    )
     return {
         "photos": [
             {
