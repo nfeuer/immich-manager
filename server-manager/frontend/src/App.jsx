@@ -7,6 +7,7 @@ import DiskHealthCard from './components/DiskHealthCard.jsx'
 import BackupsCard from './components/BackupsCard.jsx'
 import LogViewer from './components/LogViewer.jsx'
 import ServiceControls from './components/ServiceControls.jsx'
+import UpdateManagement from './components/UpdateManagement.jsx'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -50,6 +51,7 @@ export default function App() {
           <AlertsPanel />
           <LogViewer />
           <ServiceControls />
+          <UpdateManagement />
         </div>
       </div>
     </ErrorBoundary>
