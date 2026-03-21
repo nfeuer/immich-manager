@@ -1,5 +1,7 @@
 import React from 'react'
 import Header from './components/Header.jsx'
+import SystemStatusCard from './components/SystemStatusCard.jsx'
+import ImmichStatusCard from './components/ImmichStatusCard.jsx'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -34,6 +36,11 @@ export default function App() {
       <div className="min-h-screen bg-immich-bg text-immich-text">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <Header />
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
+            <SystemStatusCard />
+            <ImmichStatusCard />
+            {/* remaining cards added in later tasks */}
+          </div>
         </div>
       </div>
     </ErrorBoundary>
