@@ -2,6 +2,7 @@ import React from 'react'
 import Header from './components/Header.jsx'
 import SystemStatusCard from './components/SystemStatusCard.jsx'
 import ImmichStatusCard from './components/ImmichStatusCard.jsx'
+import AlertsPanel from './components/AlertsPanel.jsx'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -41,6 +42,7 @@ export default function App() {
             <ImmichStatusCard />
             {/* remaining cards added in later tasks */}
           </div>
+          <AlertsPanel />
         </div>
       </div>
     </ErrorBoundary>
