@@ -69,3 +69,7 @@ Thumbs.db
 *.tmp
 temp/
 tmp/
+
+# Node
+node_modules/
+server-manager/frontend/node_modules/
