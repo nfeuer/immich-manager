@@ -1,4 +1,5 @@
 import React from 'react'
+import Header from './components/Header.jsx'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -32,7 +33,7 @@ export default function App() {
     <ErrorBoundary>
       <div className="min-h-screen bg-immich-bg text-immich-text">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <p className="text-immich-muted">Loading components…</p>
+          <Header />
         </div>
       </div>
     </ErrorBoundary>
