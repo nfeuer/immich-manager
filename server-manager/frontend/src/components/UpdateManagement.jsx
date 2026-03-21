@@ -25,6 +25,15 @@ export default function UpdateManagement() {
   useEffect(() => { load() }, [])
 
   useEffect(() => {
+    return () => {
+      if (esRef.current) {
+        esRef.current.close()
+        esRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     if (updating && progressRef.current) {
       progressRef.current.scrollTop = progressRef.current.scrollHeight
     }
@@ -49,6 +58,7 @@ export default function UpdateManagement() {
           if (['done', 'rolled_back', 'error'].includes(obj.step)) {
             es.close()
             esRef.current = null
+            setUpdating(false)
             load()
           }
         } catch {}
@@ -111,7 +121,8 @@ export default function UpdateManagement() {
             </span>
             <button
               onClick={() => { applyUpdate() }}
-              className="px-4 py-1.5 bg-immich-primary hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors duration-150"
+              disabled={updating}
+              className="px-4 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150"
             >
               Apply Update
             </button>

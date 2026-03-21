@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { ArrowPathIcon, WrenchScrewdriverIcon } from '@heroicons/react/24/outline'
 
 const SERVICES = [
@@ -10,8 +10,22 @@ const SERVICES = [
   'photo_curator',
 ]
 
+function ButtonContent({ state }) {
+  if (state === 'loading') return <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" />
+  if (state === 'ok') return <span>✓</span>
+  if (state === 'error') return <span>✗</span>
+  return <span>Restart</span>
+}
+
 export default function ServiceControls() {
   const [states, setStates] = useState({}) // { [service]: 'idle' | 'loading' | 'ok' | 'error' }
+  const timeoutRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
+  }, [])
 
   async function restartService(service) {
     if (!window.confirm(`Restart ${service}?`)) return
@@ -22,7 +36,8 @@ export default function ServiceControls() {
     } catch {
       setStates((s) => ({ ...s, [service]: 'error' }))
     }
-    setTimeout(() => setStates((s) => ({ ...s, [service]: 'idle' })), 3000)
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    timeoutRef.current = setTimeout(() => setStates((s) => ({ ...s, [service]: 'idle' })), 3000)
   }
 
   async function restartAll() {
@@ -34,14 +49,6 @@ export default function ServiceControls() {
     } catch {
       window.alert('Failed to restart all services.')
     }
-  }
-
-  function ButtonContent({ service }) {
-    const state = states[service] ?? 'idle'
-    if (state === 'loading') return <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" />
-    if (state === 'ok') return <span>✓</span>
-    if (state === 'error') return <span>✗</span>
-    return <span>Restart</span>
   }
 
   return (
@@ -58,7 +65,7 @@ export default function ServiceControls() {
               disabled={(states[svc] ?? 'idle') === 'loading'}
               className="px-3 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors duration-150 min-w-[64px] flex items-center justify-center"
             >
-              <ButtonContent service={svc} />
+              <ButtonContent state={states[svc] ?? 'idle'} />
             </button>
           </div>
         ))}
