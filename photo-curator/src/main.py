@@ -764,6 +764,31 @@ async def get_monthly_photos(
     }
 
 
+@app.get("/api/photos/{year}/{month}/raw")
+async def get_raw_photos(
+    year: int,
+    month: int,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Fetch photos for a month directly from Immich, no analysis required."""
+    immich_api_url = app.state.immich_api_url
+    user_client = ImmichClient(immich_api_url, current_user["access_token"], use_bearer=True)
+    photos = user_client.get_user_photos(current_user["id"], year, month)
+    return {
+        "photos": [
+            {
+                "asset_id": p["id"],
+                "thumbnail_url": f"/api/thumbnail/{p['id']}",
+                "width": p.get("exifInfo", {}).get("exifImageWidth"),
+                "height": p.get("exifInfo", {}).get("exifImageHeight"),
+                "taken_at": p.get("fileCreatedAt"),
+            }
+            for p in photos
+        ],
+        "total": len(photos),
+    }
+
+
 @app.post("/api/curation/{year}/{month}/update")
 @limiter.limit("20/minute")
 async def update_curation(
