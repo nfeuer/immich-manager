@@ -1,0 +1,40 @@
+import React from 'react'
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-immich-bg flex items-center justify-center p-8">
+          <div className="bg-immich-surface border border-red-800 rounded-2xl p-6 max-w-lg w-full">
+            <h2 className="text-red-400 font-semibold mb-2">Something went wrong</h2>
+            <pre className="text-immich-muted text-xs font-mono whitespace-pre-wrap">
+              {this.state.error?.message}
+            </pre>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <div className="min-h-screen bg-immich-bg text-immich-text">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <p className="text-immich-muted">Loading components…</p>
+        </div>
+      </div>
+    </ErrorBoundary>
+  )
+}
