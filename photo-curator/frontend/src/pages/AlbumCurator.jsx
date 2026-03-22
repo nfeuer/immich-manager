@@ -9,7 +9,7 @@ import CurationFooter from '../components/CurationFooter'
 const MONTH_NAMES = ['January','February','March','April','May','June',
                      'July','August','September','October','November','December']
 
-export default function AlbumCurator({ onAuthError }) {
+export default function AlbumCurator() {
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)

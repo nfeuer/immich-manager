@@ -23,7 +23,7 @@ export function useCurator(year, month) {
     if (rawQuery.data && rawQuery.data.total > 0 && !analyzeMutation.isSuccess && !analyzeMutation.isPending) {
       analyzeMutation.mutate()
     }
-  }, [rawQuery.data])
+  }, [rawQuery.data, analyzeMutation.isSuccess, analyzeMutation.isPending, analyzeMutation.mutate])
 
   // Step 3: poll scored photos to track analysis progress
   const scoredQuery = useQuery({
