@@ -7,6 +7,7 @@ import sys
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends, Form, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -55,6 +56,11 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Serve React frontend assets — must be declared before route handlers
+_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="assets")
 
 
 class NotAuthenticatedException(Exception):
@@ -106,14 +112,13 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     """Add security headers to every response."""
     response = await call_next(request)
-    # Photo curator uses Tailwind CDN, Chart.js CDN, and Leaflet map tiles
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com; "
-        "img-src 'self' data: blob: https://*.tile.openstreetmap.org; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
         "connect-src 'self'; "
-        "font-src 'self' https://cdn.jsdelivr.net; "
+        "font-src 'self'; "
         "frame-ancestors 'none'"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -444,69 +449,12 @@ async def require_user_page(request: Request):
 
 # Web UI
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request, user: Dict = Depends(require_user_page)):
-    """Serve curator UI (requires User role)"""
-
-    html_path = Path(__file__).parent.parent / "static" / "curator.html"
-    if html_path.exists():
-        return html_path.read_text()
-
-    # Return placeholder if static file doesn't exist
-    return f"""
-    <html>
-        <head>
-            <title>Photo Curator</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-                body {{
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    background: #f5f5f5;
-                    padding: 20px;
-                }}
-                .container {{ max-width: 800px; margin: 0 auto; }}
-                .card {{
-                    background: white;
-                    padding: 30px;
-                    border-radius: 12px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                    margin-bottom: 20px;
-                }}
-                h1 {{ color: #2563eb; margin-bottom: 10px; }}
-                .user-info {{
-                    background: #f0f9ff;
-                    padding: 15px;
-                    border-radius: 8px;
-                    margin-bottom: 20px;
-                }}
-                .button {{
-                    background: #2563eb;
-                    color: white;
-                    border: none;
-                    padding: 12px 24px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    text-decoration: none;
-                    display: inline-block;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="card">
-                    <h1>📸 Photo Curator</h1>
-                    <div class="user-info">
-                        <strong>Logged in as:</strong> {user.get('name', user.get('email'))}
-                    </div>
-                    <p>Select a month to start curating your photos</p>
-                    <br>
-                    <a href="/curate" class="button">Start Curating</a>
-                    <a href="/docs" class="button" style="background:#6b7280">API Docs</a>
-                </div>
-            </div>
-        </body>
-    </html>
-    """
+async def serve_spa(request: Request):
+    """Serve React SPA entry point."""
+    index_path = Path(__file__).resolve().parent.parent / "frontend" / "dist" / "index.html"
+    if index_path.exists():
+        return HTMLResponse(content=index_path.read_text())
+    return HTMLResponse(content="<p>Frontend not built. Run: cd photo-curator/frontend && npm run build</p>", status_code=503)
 
 
 # API Endpoints (all require authentication)
