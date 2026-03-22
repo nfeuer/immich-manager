@@ -517,6 +517,24 @@ class Database:
                 WHERE user_id = ? AND year = ? AND month = ?
             """, (album_id, album_name, user_id, year, month))
 
+    def get_year_progress(self, user_id: str, year: int) -> dict:
+        """
+        Return curation status for all 12 months of a year.
+
+        Returns:
+            Dict mapping month (1-12) to bool (True = completed album exists)
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT month FROM curation_sessions
+                WHERE user_id = ? AND year = ? AND completed = 1 AND album_id IS NOT NULL
+                """,
+                (user_id, year),
+            ).fetchall()
+        curated = {row[0] for row in rows}
+        return {month: month in curated for month in range(1, 13)}
+
     def get_curation_session(self, user_id: str, year: int, month: int) -> Optional[Dict]:
         """Get curation session"""
         with self._get_connection() as conn:
