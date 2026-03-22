@@ -19,16 +19,17 @@ def _auth_override():
 
 
 def test_year_progress_returns_12_months():
+    original_db = getattr(app.state, "database", None)
     app.dependency_overrides[get_current_user] = _auth_override
-
     mock_db = MagicMock()
     mock_db.get_year_progress.return_value = {m: m in (1, 3) for m in range(1, 13)}
     app.state.database = mock_db
-
-    client = TestClient(app)
-    resp = client.get("/api/progress/year/2024")
-
-    app.dependency_overrides = {}
+    try:
+        client = TestClient(app)
+        resp = client.get("/api/progress/year/2024")
+    finally:
+        app.dependency_overrides = {}
+        app.state.database = original_db
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 12
