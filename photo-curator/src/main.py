@@ -793,6 +793,19 @@ async def get_raw_photos(
     }
 
 
+@app.get("/api/progress/year/{year}")
+@limiter.limit("60/minute")
+async def get_year_progress(
+    request: Request,
+    year: int,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Return curation status for all 12 months of a year."""
+    db = app.state.database
+    progress = db.get_year_progress(current_user["id"], year)
+    return progress
+
+
 @app.post("/api/curation/{year}/{month}/update")
 @limiter.limit("20/minute")
 async def update_curation(
