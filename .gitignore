@@ -75,3 +75,4 @@ node_modules/
 server-manager/frontend/node_modules/
 # Frontend build output is committed so deployment is just: git pull + restart
 !server-manager/frontend/dist/
+!photo-curator/frontend/dist/
