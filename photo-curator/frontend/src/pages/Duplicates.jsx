@@ -35,7 +35,7 @@ function DuplicateCard({ group, onDelete }) {
   )
 }
 
-export default function Duplicates({ onAuthError }) {
+export default function Duplicates() {
   const queryClient = useQueryClient()
 
   const { data, isLoading } = useQuery({

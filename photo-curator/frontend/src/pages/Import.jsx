@@ -9,7 +9,7 @@ const SOURCES = [
 
 const STEPS = ['Choose source', 'Configure', 'Preview', 'Import']
 
-export default function Import({ onAuthError }) {
+export default function Import() {
   const [step, setStep] = useState(0)
   const [source, setSource] = useState(null)
   const [path, setPath] = useState('')

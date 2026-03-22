@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { apiFetch } from '../utils/api'
 
-export default function Preferences({ onAuthError }) {
+export default function Preferences() {
   const { data } = useQuery({
     queryKey: ['preferences'],
     queryFn: () => apiFetch('/api/preferences'),

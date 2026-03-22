@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../utils/api'
 import { PlusIcon } from '@heroicons/react/24/outline'
 
-export default function Events({ onAuthError }) {
+export default function Events() {
   const queryClient = useQueryClient()
 
   const { data, isLoading } = useQuery({

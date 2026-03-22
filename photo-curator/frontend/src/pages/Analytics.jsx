@@ -10,7 +10,7 @@ function StatCard({ label, value }) {
   )
 }
 
-export default function Analytics({ onAuthError }) {
+export default function Analytics() {
   const { data, isLoading } = useQuery({
     queryKey: ['analytics'],
     queryFn: () => apiFetch('/api/analytics'),
