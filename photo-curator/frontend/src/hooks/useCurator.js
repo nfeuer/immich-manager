@@ -20,16 +20,22 @@ export function useCurator(year, month) {
   })
 
   useEffect(() => {
-    if (rawQuery.data && rawQuery.data.total > 0 && !analyzeMutation.isSuccess && !analyzeMutation.isPending) {
-      analyzeMutation.mutate()
-    }
+    if (!rawQuery.data || rawQuery.data.total === 0) return
+    if (analyzeMutation.isSuccess || analyzeMutation.isPending) return
+    // Skip if all photos are already scored
+    if (rawQuery.data.scored_count >= rawQuery.data.total) return
+    analyzeMutation.mutate()
   }, [rawQuery.data, analyzeMutation.isSuccess, analyzeMutation.isPending, analyzeMutation.mutate])
 
-  // Step 3: poll scored photos to track analysis progress
+  // Step 3: poll scored photos to track analysis progress; stop once all are scored
   const scoredQuery = useQuery({
     queryKey: ['scoredPhotos', year, month],
     queryFn: () => apiFetch(`/api/photos/${year}/${month}`),
-    refetchInterval: 5_000,
+    refetchInterval: (query) => {
+      const scored = query.state.data?.photos?.length ?? 0
+      const total = rawQuery.data?.total ?? 0
+      return total > 0 && scored >= total ? false : 5_000
+    },
   })
 
   const rawTotal = rawQuery.data?.total ?? 0
@@ -41,15 +47,13 @@ export function useCurator(year, month) {
   const [curated, setCurated] = useState(false)
   const [recommendedCount, setRecommendedCount] = useState(null)
 
-  const curateMutation = useMutation({
-    mutationFn: () => apiFetch(`/api/curation/${year}/${month}`),
-    onSuccess: (data) => {
-      const suggested = data.suggested_asset_ids ?? []
-      setSelected(new Set(suggested))
-      setRecommendedCount(suggested.length)
-      setCurated(true)
-    },
-  })
+  // AI Curate: read the already-fetched session's ai_suggested list — no extra request needed
+  const aiCurateAction = useCallback(() => {
+    const suggested = scoredQuery.data?.session?.ai_suggested ?? []
+    setSelected(new Set(suggested))
+    setRecommendedCount(suggested.length)
+    setCurated(true)
+  }, [scoredQuery.data])
 
   const togglePhoto = useCallback((assetId) => {
     setSelected(prev => {
@@ -60,10 +64,13 @@ export function useCurator(year, month) {
     })
   }, [])
 
+  const monthName = new Date(year, month - 1).toLocaleString('en-US', { month: 'long' })
+  const albumName = `${monthName} ${year}`
+
   const saveAlbumMutation = useMutation({
     mutationFn: () => apiFetch(`/api/curation/${year}/${month}/complete`, {
       method: 'POST',
-      body: JSON.stringify({ selected_asset_ids: [...selected] }),
+      body: JSON.stringify({ asset_ids: [...selected], album_name: albumName }),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['yearProgress'] })
@@ -86,8 +93,8 @@ export function useCurator(year, month) {
     selected,
     curated,
     togglePhoto,
-    aiCurate: curateMutation.mutate,
-    isCurating: curateMutation.isPending,
+    aiCurate: aiCurateAction,
+    isCurating: false,
     saveAlbum: saveAlbumMutation.mutate,
     isSaving: saveAlbumMutation.isPending,
     resetCuration,

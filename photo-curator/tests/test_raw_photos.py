@@ -46,10 +46,12 @@ def test_raw_photos_returns_list():
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 2
+    assert "scored_count" in data
     assert data["photos"][0]["asset_id"] == "asset-1"
     assert data["photos"][0]["thumbnail_url"] == "/api/thumbnail/asset-1"
     assert data["photos"][0]["width"] == 1920
     assert data["photos"][0]["height"] == 1080
+    assert "scored" in data["photos"][0]
 
 
 def test_raw_photos_requires_auth():
@@ -60,6 +62,7 @@ def test_raw_photos_requires_auth():
 
 
 def test_raw_photos_empty_month():
+    app.dependency_overrides = {}
     app.dependency_overrides[get_current_user] = _auth_override
 
     with patch("src.main.ImmichClient") as MockClient:

@@ -726,6 +726,12 @@ async def get_raw_photos(
     photos = await asyncio.to_thread(
         user_client.get_user_photos, current_user["id"], year, month
     )
+    db = app.state.database
+    if db:
+        scores = db.get_photo_scores(current_user["id"], year, month)
+        scored_ids = {s["asset_id"] for s in scores}
+    else:
+        scored_ids = set()
     return {
         "photos": [
             {
@@ -734,10 +740,12 @@ async def get_raw_photos(
                 "width": p.get("exifInfo", {}).get("exifImageWidth"),
                 "height": p.get("exifInfo", {}).get("exifImageHeight"),
                 "taken_at": p.get("fileCreatedAt"),
+                "scored": p["id"] in scored_ids,
             }
             for p in photos
         ],
         "total": len(photos),
+        "scored_count": sum(1 for p in photos if p["id"] in scored_ids),
     }
 
 
