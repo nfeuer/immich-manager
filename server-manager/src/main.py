@@ -200,7 +200,7 @@ async def startup_event():
         alert_manager = AlertManager(config.alerts)
 
         # Initialize update checker
-        update_checker = UpdateChecker(docker_monitor)
+        update_checker = UpdateChecker(docker_monitor, immich_api_url=config.immich.api_url)
 
         # Initialize auto-updater (only when enabled in config)
         if config.auto_update.enabled:
@@ -652,7 +652,8 @@ async def test_alert(request: Request, user: Dict = Depends(require_admin)):
 @app.get("/api/immich-update")
 @limiter.limit("5/minute")
 async def check_immich_update(request: Request, user: Dict = Depends(require_admin)):
-    """Check if a newer Immich version is available on GitHub"""
+    """Legacy diagnostic endpoint. Uses Docker image tag fallback only (not Immich API).
+    Not used by the frontend update flow — see /api/updates/status instead."""
     if not update_checker:
         raise HTTPException(status_code=503, detail="Update checker not initialized")
 
@@ -1215,14 +1216,14 @@ async def get_update_status(request: Request, user: Dict = Depends(require_admin
         raise HTTPException(status_code=503, detail="Update checker not initialized")
 
     loop = asyncio.get_running_loop()
-    current, latest = await asyncio.gather(
-        loop.run_in_executor(None, update_checker.get_running_version),
+    (current, immich_reachable), latest = await asyncio.gather(
+        loop.run_in_executor(None, update_checker.get_running_version_with_reachability),
         loop.run_in_executor(None, update_checker.get_latest_github_version),
     )
 
     update_available = False
     changelog_url = None
-    if current and latest:
+    if immich_reachable and current and latest:
         try:
             update_available = (
                 update_checker._parse_version(latest) > update_checker._parse_version(current)
@@ -1240,6 +1241,7 @@ async def get_update_status(request: Request, user: Dict = Depends(require_admin
         "current_version": current,
         "latest_version": latest,
         "update_available": update_available,
+        "immich_reachable": immich_reachable,
         "changelog_url": changelog_url,
         "history": history,
     }
