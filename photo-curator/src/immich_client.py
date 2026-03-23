@@ -94,7 +94,7 @@ class ImmichClient:
                 'takenAfter': start_str,
                 'takenBefore': end_str,
                 'type': 'IMAGE',
-                'size': 10000  # Max results
+                'size': 1000  # Immich max per page
             }
             if not getattr(self, '_use_bearer', False):
                 search_payload['userId'] = user_id
