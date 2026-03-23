@@ -168,13 +168,37 @@ Frontend (evaluated in order):
   immich_reachable=true, update_available=true    →  "Update Available" (blue) + "Apply Update" (blue)
 ```
 
+### Frontend: `UpdateManagement.test.jsx`
+
+All three existing mocks lack `immich_reachable`. After the frontend change, `!data.immich_reachable` evaluates to `true` for all of them (undefined is falsy), rendering the amber unreachable state instead of the expected UI. Fix all three mocks by adding `immich_reachable: true`.
+
+Add a fourth test:
+```js
+it('shows red "Immich unreachable" badge and amber "Update anyway" button', async () => {
+  global.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      current_version: null, latest_version: '1.3.0',
+      update_available: false, immich_reachable: false,
+      changelog_url: null, history: [],
+    }),
+  })
+  render(React.createElement(UpdateManagement))
+  await waitFor(() => expect(screen.getByText(/immich unreachable/i)).toBeInTheDocument())
+  expect(screen.getByRole('button', { name: /update anyway/i })).toBeInTheDocument()
+})
+```
+
+**Version display in the unreachable branch:** The version spans (`v{data.current_version ?? '?'}` and `v{data.latest_version ?? '?'}`) sit outside the badge/button conditional and render in all states. In the unreachable state, `current_version` is `null` → shows `v?`; `latest_version` shows the GitHub version if available. This is intentional — the user can see what the latest version is even when Immich is unreachable.
+
 ## Files Changed
 
 | File | Change |
 |------|--------|
 | `server-manager/src/update_checker.py` | Add `_get_version_from_immich_api()` (timeout=5s, catch `RequestException`), `get_running_version_with_reachability()`, update `check_for_update()`, add `immich_api_url` constructor param |
 | `server-manager/src/main.py` | Pass `config.immich.api_url` to `UpdateChecker` at line 203; restructure `asyncio.gather` in `/api/updates/status`; add `immich_reachable` to response; comment legacy endpoint |
-| `server-manager/frontend/src/components/UpdateManagement.jsx` | Guard `current_version ?? '?'`; add `immich_reachable` branch before `upToDate` ternary; amber "Update anyway" button |
+| `server-manager/frontend/src/components/UpdateManagement.jsx` | Guard both version displays with `?? '?'`; add `immich_reachable` branch before `upToDate` ternary; amber "Update anyway" button |
+| `server-manager/frontend/src/test/UpdateManagement.test.jsx` | Add `immich_reachable: true` to all three existing mocks; add fourth test for unreachable state |
 
 ## Out of Scope
 
