@@ -32,7 +32,7 @@ class UpdateChecker:
         """Query the running Immich server for its version via the API."""
         try:
             resp = requests.get(
-                f"{self.immich_api_url}/server/version",
+                f"{self.immich_api_url.rstrip('/')}/server/version",
                 timeout=5,
             )
             resp.raise_for_status()
@@ -108,6 +108,12 @@ class UpdateChecker:
         Returns a dict with update info if a newer version exists,
         or None if up-to-date or unable to determine.
         """
+        # Uses best available version (API first, Docker tag fallback).
+        # Reachability is intentionally ignored here — the scheduler alert
+        # uses whatever version it can find. The /api/updates/status endpoint
+        # suppresses update_available when immich_reachable=False; this job
+        # does not have that constraint since it only fires when a newer version
+        # is confirmed on GitHub.
         running, _ = self.get_running_version_with_reachability()
         if not running:
             logger.debug("Could not determine running Immich version")
