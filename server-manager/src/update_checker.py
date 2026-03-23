@@ -21,11 +21,29 @@ _GITHUB_CACHE_TTL = 1800  # 30 minutes
 class UpdateChecker:
     """Checks for new Immich releases on GitHub."""
 
-    def __init__(self, docker_monitor):
+    def __init__(self, docker_monitor, immich_api_url: str):
         self.docker_monitor = docker_monitor
+        self.immich_api_url = immich_api_url
         self._last_notified_version: Optional[str] = None
         self._cached_latest: Optional[str] = None
         self._cache_ts: float = 0
+
+    def _get_version_from_immich_api(self) -> Optional[str]:
+        """Query the running Immich server for its version via the API."""
+        try:
+            resp = requests.get(
+                f"{self.immich_api_url}/server/version",
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return f"{data['major']}.{data['minor']}.{data['patch']}"
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"Immich API unreachable: {e}")
+            return None
+        except Exception as e:
+            logger.debug(f"Unexpected error querying Immich API version: {e}")
+            return None
 
     def get_running_version(self) -> Optional[str]:
         """Extract the version tag from the running immich-server container."""
@@ -43,6 +61,19 @@ class UpdateChecker:
                 if match:
                     return match.group(1)
         return None
+
+    def get_running_version_with_reachability(self) -> Tuple[Optional[str], bool]:
+        """
+        Return (version, immich_reachable).
+
+        Tries the Immich API first (authoritative). Falls back to Docker image
+        tag parsing if the API is unreachable. immich_reachable=False means the
+        API call failed regardless of whether the fallback found a version.
+        """
+        api_version = self._get_version_from_immich_api()
+        if api_version:
+            return api_version, True
+        return self.get_running_version(), False
 
     def get_latest_github_version(self) -> Optional[str]:
         """Fetch the latest release version from GitHub (cached for 30 minutes)."""
@@ -77,7 +108,7 @@ class UpdateChecker:
         Returns a dict with update info if a newer version exists,
         or None if up-to-date or unable to determine.
         """
-        running = self.get_running_version()
+        running, _ = self.get_running_version_with_reachability()
         if not running:
             logger.debug("Could not determine running Immich version")
             return None
