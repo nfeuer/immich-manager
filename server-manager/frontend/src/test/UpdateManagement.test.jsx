@@ -15,7 +15,8 @@ describe('UpdateManagement', () => {
       ok: true,
       json: async () => ({
         current_version: '1.2.3', latest_version: '1.2.3',
-        update_available: false, changelog_url: null, history: [],
+        update_available: false, immich_reachable: true,
+        changelog_url: null, history: [],
       }),
     })
     render(React.createElement(UpdateManagement))
@@ -27,7 +28,7 @@ describe('UpdateManagement', () => {
       ok: true,
       json: async () => ({
         current_version: '1.2.3', latest_version: '1.3.0',
-        update_available: true,
+        update_available: true, immich_reachable: true,
         changelog_url: 'https://github.com/immich-app/immich/releases/tag/v1.3.0',
         history: [],
       }),
@@ -42,11 +43,26 @@ describe('UpdateManagement', () => {
       ok: true,
       json: async () => ({
         current_version: '1.2.3', latest_version: '1.3.0',
-        update_available: true, changelog_url: 'https://evil.com/steal', history: [],
+        update_available: true, immich_reachable: true,
+        changelog_url: 'https://evil.com/steal', history: [],
       }),
     })
     render(React.createElement(UpdateManagement))
     await waitFor(() => screen.getByText(/update available/i))
     expect(screen.queryByText(/changelog/i)).not.toBeInTheDocument()
+  })
+
+  it('shows red "Immich unreachable" badge and amber "Update anyway" button', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        current_version: null, latest_version: '1.3.0',
+        update_available: false, immich_reachable: false,
+        changelog_url: null, history: [],
+      }),
+    })
+    render(React.createElement(UpdateManagement))
+    await waitFor(() => expect(screen.getByText(/immich unreachable/i)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /update anyway/i })).toBeInTheDocument()
   })
 })

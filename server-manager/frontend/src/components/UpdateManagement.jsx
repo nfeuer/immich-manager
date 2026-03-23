@@ -99,10 +99,10 @@ export default function UpdateManagement() {
 
       <div className="flex flex-wrap items-center gap-4 mb-4">
         <span className="text-sm text-immich-muted">
-          Current: <span className="font-mono font-semibold text-immich-text">v{data.current_version}</span>
+          Current: <span className="font-mono font-semibold text-immich-text">v{data.current_version ?? '?'}</span>
         </span>
         <span className="text-sm text-immich-muted">
-          Latest: <span className="font-mono font-semibold text-immich-text">v{data.latest_version}</span>
+          Latest: <span className="font-mono font-semibold text-immich-text">v{data.latest_version ?? '?'}</span>
         </span>
         {data.changelog_url?.startsWith('https://github.com/') && (
           <a href={data.changelog_url} target="_blank" rel="noopener noreferrer"
@@ -110,7 +110,20 @@ export default function UpdateManagement() {
             View Changelog ↗
           </a>
         )}
-        {upToDate ? (
+        {!data.immich_reachable ? (
+          <>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900/40 text-red-400 border border-red-800">
+              Immich unreachable
+            </span>
+            <button
+              onClick={() => { applyUpdate() }}
+              disabled={updating}
+              className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150"
+            >
+              Update anyway
+            </button>
+          </>
+        ) : upToDate ? (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900/40 text-green-400 border border-green-800">
             Up to date ✓
           </span>
