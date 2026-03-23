@@ -22,8 +22,10 @@ function AppInner() {
   // Wire auth error handler into react-query global
   useEffect(() => {
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
-      if (event?.error instanceof AuthError) {
-        onAuthError(event.error)
+      // TanStack Query v5: errors live at event.query.state.error, not event.error
+      const error = event?.query?.state?.error
+      if (error instanceof AuthError) {
+        onAuthError(error)
       }
     })
     return unsubscribe

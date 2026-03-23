@@ -546,9 +546,9 @@ async def analyze_user_month_background(user_id: str, year: int, month: int, use
     try:
         logger.info(f"Starting analysis for user {user_id}, {year}-{month:02d}")
 
-        # Create user-specific API client using Bearer auth (user session token, not API key)
+        # Prefer admin client (API key) over user bearer token — bearer tokens cause 400 in Immich v2.x
         logger.info(f"[ANALYZE] Using Immich API URL: {app.state.immich_api_url}")
-        user_client = ImmichClient(app.state.immich_api_url, user_token, use_bearer=True)
+        user_client = admin_immich_client or ImmichClient(app.state.immich_api_url, user_token, use_bearer=True)
 
         # Verify Immich is reachable before proceeding
         reachable = await asyncio.to_thread(user_client.check_connection)
@@ -722,7 +722,8 @@ async def get_raw_photos(
 ):
     """Fetch photos for a month directly from Immich, no analysis required."""
     immich_api_url = app.state.immich_api_url
-    user_client = ImmichClient(immich_api_url, current_user["access_token"], use_bearer=True)
+    # Prefer admin client (API key) over user bearer token — bearer tokens cause 400 in Immich v2.x
+    user_client = admin_immich_client or ImmichClient(immich_api_url, current_user["access_token"], use_bearer=True)
     photos = await asyncio.to_thread(
         user_client.get_user_photos, current_user["id"], year, month
     )
@@ -2392,7 +2393,7 @@ async def detect_events(
     user_id = user["id"]
 
     try:
-        user_client = ImmichClient(app.state.immich_api_url, user["access_token"])
+        user_client = admin_immich_client or ImmichClient(app.state.immich_api_url, user["access_token"])
         assets = user_client.get_photos_for_year(user_id, scan_year)
 
         events = _cluster_photos_into_events(assets, user_id, database)

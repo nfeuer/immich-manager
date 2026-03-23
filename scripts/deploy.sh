@@ -150,7 +150,6 @@ if [ "$ROLLBACK" = true ]; then
             cd "$REPO_DIR"
             git checkout "$sha" -- "${svc}/"
             cp -r "${REPO_DIR}/${svc}/"* "$install_dir/"
-            chown -R immich-mgr:immich-mgr "$install_dir/"
             log "Code rolled back to ${sha:0:8}"
         fi
 
@@ -236,9 +235,8 @@ for svc in "${SERVICES[@]}"; do
         photo-curator)  install_dir="$PC_INSTALL" ;;
     esac
 
-    # Copy new source files and fix ownership
+    # Copy new source files
     cp -r "${REPO_DIR}/${svc}/"* "${install_dir}/"
-    chown -R immich-mgr:immich-mgr "${install_dir}/"
     log "  ${svc}: files synced"
 
     # Install/update deps
