@@ -172,7 +172,7 @@ export default function Import() {
 
           <button
             data-testid="btn-start-import"
-            disabled={!files || files.length === 0}
+            disabled={!files || files.length === 0 || uploadMutation.isPending}
             onClick={() => uploadMutation.mutate()}
             className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40"
           >
@@ -275,7 +275,10 @@ export default function Import() {
         {historyQuery.isLoading && (
           <p className="text-immich-muted text-sm">Loading…</p>
         )}
-        {!historyQuery.isLoading && (
+        {historyQuery.isError && (
+          <p className="text-red-400 text-sm">Failed to load import history.</p>
+        )}
+        {!historyQuery.isLoading && !historyQuery.isError && (
           <div data-testid="history-list" className="space-y-2">
             {historyQuery.data?.jobs?.length === 0 && (
               <p className="text-immich-muted text-sm">No import history yet.</p>
