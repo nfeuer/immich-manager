@@ -4,6 +4,7 @@ Log fetching for server-manager services.
 Supports Docker containers and systemd journal services.
 """
 
+import json
 import logging
 import re
 import subprocess
@@ -60,28 +61,39 @@ def _container_name(service: str) -> str:
     return service
 
 
-def get_log_snapshot(service: str, lines: int = 200) -> List[str]:
-    """Return the last `lines` log lines for the given service."""
+def get_log_snapshot(service: str, lines: int = 200) -> List[dict]:
+    """Return the last `lines` log lines for the given service as classified dicts."""
+    lines = min(lines, 2000)
     if service in _DOCKER_SERVICES:
-        return _docker_snapshot(service, lines)
-    if service in _JOURNALCTL_UNITS:
-        return _journal_snapshot(_JOURNALCTL_UNITS[service], lines)
-    if service == "system":
-        return _journal_snapshot(None, lines)
-    logger.warning("Unknown log service requested: %s", service)
-    return []
+        raw = _docker_snapshot(service, lines)
+    elif service in _JOURNALCTL_UNITS:
+        raw = _journal_snapshot(_JOURNALCTL_UNITS[service], lines)
+    elif service == "system":
+        raw = _journal_snapshot(None, lines)
+    else:
+        logger.warning("Unknown log service requested: %s", service)
+        return []
+    result = []
+    for line in raw:
+        text = _strip_ansi(line)
+        result.append({"level": classify_line(text), "text": text})
+    return result
 
 
 def stream_log_lines(service: str) -> Generator[str, None, None]:
-    """Yield new log lines indefinitely for the given service."""
+    """Yield classified log lines as JSON strings for the given service."""
     if service in _DOCKER_SERVICES:
-        yield from _docker_stream(service)
+        raw = _docker_stream(service)
     elif service in _JOURNALCTL_UNITS:
-        yield from _journal_stream(_JOURNALCTL_UNITS[service])
+        raw = _journal_stream(_JOURNALCTL_UNITS[service])
     elif service == "system":
-        yield from _journal_stream(None)
+        raw = _journal_stream(None)
     else:
         logger.warning("Unknown log service stream requested: %s", service)
+        return
+    for line in raw:
+        text = _strip_ansi(line)
+        yield json.dumps({"level": classify_line(text), "text": text})
 
 
 # --- Docker helpers ---
