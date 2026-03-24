@@ -5,6 +5,7 @@ Supports Docker containers and systemd journal services.
 """
 
 import logging
+import re
 import subprocess
 from typing import Generator, List
 
@@ -26,10 +27,37 @@ _JOURNALCTL_UNITS = {
     "photo_curator": "photo-curator",
 }
 
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+_LEVEL_PATTERNS = [
+    ('error', re.compile(r'\bERROR\b|level=error', re.IGNORECASE)),
+    ('warn',  re.compile(r'\bWARN(?:ING)?\b|level=warn(?:ing)?', re.IGNORECASE)),
+    ('info',  re.compile(r'\bINFO\b|level=info', re.IGNORECASE)),
+    ('debug', re.compile(r'\bDEBUG\b|level=debug', re.IGNORECASE)),
+]
+
+
+def _strip_ansi(line: str) -> str:
+    """Remove ANSI/CSI escape sequences from a log line."""
+    return _ANSI_RE.sub('', line)
+
+
+def classify_line(line: str) -> str:
+    """Classify a log line into a level: error, warn, info, debug, or untagged.
+
+    Strips ANSI codes before matching. Patterns evaluated in priority order;
+    first match wins.
+    """
+    clean = _strip_ansi(line)
+    for level, pattern in _LEVEL_PATTERNS:
+        if pattern.search(clean):
+            return level
+    return 'untagged'
+
 
 def _container_name(service: str) -> str:
-    """Convert service key to Docker container name (underscore → hyphen prefix match)."""
-    return service.replace("_", "-")
+    """Return the Docker container name filter for a service key."""
+    return service
 
 
 def get_log_snapshot(service: str, lines: int = 200) -> List[str]:
