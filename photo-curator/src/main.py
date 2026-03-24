@@ -1973,14 +1973,6 @@ def _run_import_sync(
 # Import endpoints
 # ------------------------------------------------------------------
 
-@app.get("/import", response_class=HTMLResponse)
-async def import_ui(request: Request, user: Dict = Depends(require_user_page)):
-    """Serve import wizard UI."""
-    html_path = Path(__file__).parent.parent / "static" / "import.html"
-    if html_path.exists():
-        return html_path.read_text()
-    return HTMLResponse("<h1>Import page not found</h1>", status_code=404)
-
 
 @app.post("/api/import/upload")
 @limiter.limit("10/minute")
