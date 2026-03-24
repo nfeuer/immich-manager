@@ -125,9 +125,9 @@ export default function LogViewer() {
     }
   }, [logLines, isLive])
 
-  const visibleLines = activeFilters.size === 0
-    ? logLines
-    : logLines.filter((l) => activeFilters.has(l.level))
+  const visibleLines = logLines
+    .map((line, idx) => ({ line, idx }))
+    .filter(({ line }) => activeFilters.size === 0 || activeFilters.has(line.level))
 
   const toggleFilter = (level) => {
     setActiveFilters((prev) => {
@@ -227,9 +227,9 @@ export default function LogViewer() {
         {loading ? (
           <span className="text-gray-300">Loading…</span>
         ) : visibleLines.length > 0 ? (
-          visibleLines.map((line, i) => (
+          visibleLines.map(({ line, idx }) => (
             <div
-              key={i}
+              key={idx}
               className={`whitespace-pre-wrap break-all leading-relaxed ${LEVEL_COLORS[line.level] ?? 'text-gray-300'}`}
             >
               {line.text}
