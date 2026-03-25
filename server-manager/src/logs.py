@@ -76,7 +76,7 @@ def get_log_snapshot(service: str, lines: int = 200) -> List[dict]:
     result = []
     for line in raw:
         text = _strip_ansi(line)
-        result.append({"level": classify_line(text), "text": text})
+        result.append({"level": classify_line(line), "text": text})
     return result
 
 
@@ -93,7 +93,7 @@ def stream_log_lines(service: str) -> Generator[str, None, None]:
         return
     for line in raw:
         text = _strip_ansi(line)
-        yield json.dumps({"level": classify_line(text), "text": text})
+        yield json.dumps({"level": classify_line(line), "text": text})
 
 
 # --- Docker helpers ---

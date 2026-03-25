@@ -99,6 +99,7 @@ export default function LogViewer() {
 
   useEffect(() => {
     stopStream()
+    setActiveFilters(new Set())
     if (isLive) {
       startStream(selectedService)
     } else {

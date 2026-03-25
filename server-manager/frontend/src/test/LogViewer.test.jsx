@@ -22,8 +22,9 @@ beforeEach(() => {
 })
 
 describe('LogViewer', () => {
-  it('renders all 7 service tabs', () => {
+  it('renders all 7 service tabs', async () => {
     render(React.createElement(LogViewer))
+    await waitFor(() => screen.getByRole('button', { name: /immich_server/ }))
     expect(screen.getByRole('button', { name: /immich_server/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /system/ })).toBeInTheDocument()
   })
@@ -45,8 +46,9 @@ describe('LogViewer', () => {
     })
   })
 
-  it('renders All filter button as active by default', () => {
+  it('renders All filter button as active by default', async () => {
     render(React.createElement(LogViewer))
+    await waitFor(() => screen.getByRole('button', { name: /^All$/ }))
     const allBtn = screen.getByRole('button', { name: /^All$/ })
     expect(allBtn.className).toMatch(/border-immich-primary/)
   })
