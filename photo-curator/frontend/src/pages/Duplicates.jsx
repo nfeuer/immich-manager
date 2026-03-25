@@ -286,7 +286,7 @@ function DetailPanel({ group, onClose }) {
     >
       <div className="flex items-center justify-between p-4 border-b border-immich-border">
         <h2 className="text-immich-text font-semibold">{assets.length} Similar Photos</h2>
-        <button onClick={onClose} className="text-immich-muted hover:text-immich-text">
+        <button onClick={onClose} aria-label="Close" className="text-immich-muted hover:text-immich-text">
           <XMarkIcon className="w-5 h-5" />
         </button>
       </div>
