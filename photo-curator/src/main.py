@@ -1021,69 +1021,6 @@ async def get_analytics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Duplicate Management
-@app.get("/duplicates", response_class=HTMLResponse)
-async def duplicates_ui(request: Request, user: Dict = Depends(require_user_page)):
-    """Serve duplicate manager UI (requires User role)"""
-
-    html_path = Path(__file__).parent.parent / "static" / "duplicates.html"
-    if html_path.exists():
-        return html_path.read_text()
-
-    return HTMLResponse("<h1>Duplicate Manager not found</h1>", status_code=404)
-
-
-class DuplicateDelete(BaseModel):
-    """Duplicate deletion request"""
-    asset_ids: List[str]
-
-
-@app.post("/api/duplicates/delete")
-@limiter.limit("5/minute")
-async def delete_duplicates(
-    request: Request,
-    delete_request: DuplicateDelete,
-    user: Dict = Depends(get_current_user),
-    _role=Depends(require_role(Role.USER)),
-):
-    """Delete duplicate photos from Immich (requires User role)"""
-    try:
-        # Create user-specific API client
-        user_client = ImmichClient(app.state.immich_api_url, user['access_token'])
-
-        deleted_count = 0
-        failed_count = 0
-
-        for asset_id in delete_request.asset_ids:
-            try:
-                # Delete from Immich
-                response = user_client.session.delete(
-                    f"{user_client.api_url}/assets",
-                    json={"ids": [asset_id]}
-                )
-                response.raise_for_status()
-                deleted_count += 1
-
-                # Remove from database
-                if database:
-                    database.delete_photo_score(asset_id)
-
-            except Exception as e:
-                logger.error(f"Failed to delete asset {asset_id}: {e}")
-                failed_count += 1
-
-        return {
-            "status": "completed",
-            "deleted": deleted_count,
-            "failed": failed_count,
-            "total": len(delete_request.asset_ids)
-        }
-
-    except Exception as e:
-        logger.error(f"Error deleting duplicates: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ====================================================================
 # Standalone Dedup Scanner
 # ====================================================================
