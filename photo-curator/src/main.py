@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Any
+import json
 import os
 import uvicorn
 import yaml
@@ -39,6 +40,7 @@ from .notifications import EmailNotifier
 from .logging_config import setup_json_logging
 from .batch_processor import BatchProcessor
 from .gpu_utils import GPUManager
+from .dedup_scanner import DedupScanner
 from shared.auth import (
     Role, ensure_users_table, require_role,
     get_all_users, update_user_role,
@@ -137,6 +139,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 email_notifier: Optional[EmailNotifier] = None
 batch_processor: Optional[BatchProcessor] = None
 gpu_manager: Optional[GPUManager] = None
+dedup_scanner: Optional[DedupScanner] = None
 
 _ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
@@ -182,7 +185,7 @@ class EventAlbumCreate(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application"""
-    global config, database, admin_immich_client, photo_cache, analyzer, scheduler, email_notifier, batch_processor, gpu_manager
+    global config, database, admin_immich_client, photo_cache, analyzer, scheduler, email_notifier, batch_processor, gpu_manager, dedup_scanner
 
     try:
         # Load configuration
@@ -207,6 +210,8 @@ async def startup_event():
         database = Database()
         ensure_users_table(database)
         app.state.database = database
+        dedup_scanner = DedupScanner(database, config.get('dedup', {}))
+        app.state.dedup_scanner = dedup_scanner
         logger.info(f"[DB] Database path: {Path(database.db_path).resolve()}")
         app.state.default_role = config.get("auth", {}).get("default_role", "user")
         app.state.guest_link_default_expiry_days = config.get("auth", {}).get("guest_link_default_expiry_days", 30)
@@ -1080,6 +1085,182 @@ async def delete_duplicates(
 
 
 # ====================================================================
+# Standalone Dedup Scanner
+# ====================================================================
+
+class DedupDeepScanRequest(BaseModel):
+    date_from: str  # ISO date: YYYY-MM-DD
+    date_to: str
+
+
+class DedupEstimateRequest(BaseModel):
+    date_from: str
+    date_to: str
+
+
+class DedupResolveRequest(BaseModel):
+    keep_asset_id: str
+
+
+@app.post("/api/dedup/scan/estimate")
+async def dedup_estimate(
+    request: Request,
+    body: DedupEstimateRequest,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    db = app.state.database
+    scanner = getattr(app.state, 'dedup_scanner', None)
+    if not db or not scanner:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    user_client = ImmichClient(app.state.immich_api_url, user['access_token'], use_bearer=True)
+    result = await scanner.estimate(
+        user['id'], body.date_from, body.date_to, user_client
+    )
+    return result
+
+
+@app.post("/api/dedup/scan/deep")
+async def dedup_start_deep(
+    request: Request,
+    body: DedupDeepScanRequest,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    db = app.state.database
+    scanner = getattr(app.state, 'dedup_scanner', None)
+    if not db or not scanner:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    if scanner.is_running():
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "scan_already_running", "scan_id": scanner.current_scan_id()}
+        )
+    user_client = ImmichClient(app.state.immich_api_url, user['access_token'], use_bearer=True)
+    scan_id = await scanner.start_deep_scan(user['id'], body.date_from, body.date_to, user_client)
+    return {"scan_id": scan_id, "status": "running"}
+
+
+@app.post("/api/dedup/scan/quick")
+async def dedup_start_quick(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    db = app.state.database
+    scanner = getattr(app.state, 'dedup_scanner', None)
+    if not db or not scanner:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    if scanner.is_running():
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "scan_already_running", "scan_id": scanner.current_scan_id()}
+        )
+    user_client = ImmichClient(app.state.immich_api_url, user['access_token'], use_bearer=True)
+    scan_id = await scanner.start_quick_scan(user['id'], user_client)
+    return {"scan_id": scan_id, "status": "running"}
+
+
+@app.get("/api/dedup/scan/status")
+async def dedup_scan_status(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    db = app.state.database
+    if not db:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    scan = db.get_dedup_scan_status(user['id'])
+    if not scan:
+        return {"status": "idle"}
+    phase = DedupScanner.derive_phase(
+        scan['status'], scan.get('hashed', 0), scan.get('total_assets', 0)
+    )
+    return {**scan, "phase": phase}
+
+
+@app.delete("/api/dedup/scan")
+async def dedup_cancel_scan(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    scanner = getattr(app.state, 'dedup_scanner', None)
+    if not scanner:
+        return {"cancelled": False}
+    cancelled = await scanner.cancel()
+    return {"cancelled": cancelled}
+
+
+@app.get("/api/dedup/groups")
+async def dedup_get_groups(
+    request: Request,
+    include_resolved: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    db = app.state.database
+    if not db:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    limit = min(limit, 200)
+    return db.get_dedup_groups(user['id'], include_resolved=include_resolved, limit=limit, offset=offset)
+
+
+@app.post("/api/dedup/groups/{group_id}/resolve")
+@limiter.limit("30/minute")
+async def dedup_resolve_group(
+    request: Request,
+    group_id: int,
+    body: DedupResolveRequest,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    db = app.state.database
+    if not db:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    result = db.get_dedup_groups(user['id'])
+    group = next((g for g in result['groups'] if g['id'] == group_id), None)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    asset_ids = json.loads(group['asset_ids']) if isinstance(group['asset_ids'], str) else group['asset_ids']
+    to_delete = [aid for aid in asset_ids if aid != body.keep_asset_id]
+
+    user_client = ImmichClient(app.state.immich_api_url, user['access_token'], use_bearer=True)
+    deleted = 0
+    try:
+        for asset_id in to_delete:
+            resp = user_client.session.delete(
+                f"{user_client.api_url}/assets", json={"ids": [asset_id]}
+            )
+            resp.raise_for_status()
+            db.delete_photo_score(asset_id)
+            deleted += 1
+    except Exception as e:
+        logger.error(f"Immich delete failed during group resolve: {e}")
+        return {"resolved": False, "error": "immich_delete_failed", "detail": str(e)}
+
+    db.resolve_dedup_group(group_id)
+    return {"resolved": True, "deleted_count": deleted}
+
+
+@app.delete("/api/dedup/groups/{group_id}")
+async def dedup_dismiss_group(
+    request: Request,
+    group_id: int,
+    user: Dict = Depends(get_current_user),
+    _role=Depends(require_role(Role.USER)),
+):
+    db = app.state.database
+    if not db:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    db.dismiss_dedup_group(group_id)
+    return {"dismissed": True}
+
+
+# ====================================================================
 # Year in Review
 # ====================================================================
 
@@ -1862,6 +2043,7 @@ def _load_importer_class(source_type: str):
         "google": ("google-photos-import.py", "GooglePhotosImporter"),
         "apple": ("apple-photos-import.py", "ApplePhotosImporter"),
         "icloud": ("icloud-import.py", "ICloudImporter"),
+        "folder": ("folder-import.py", "FolderImporter"),
     }
     filename, class_name = file_map[source_type]
     spec = importlib.util.spec_from_file_location(
@@ -1886,11 +2068,7 @@ def _run_import_sync(
         ImporterClass = _load_importer_class(source_type)
 
         # Create importer — SSO token works as api_key for Immich API
-        if source_type == "google":
-            importer = ImporterClass(Path(directory), immich_url, user_token)
-        elif source_type == "apple":
-            importer = ImporterClass(Path(directory), immich_url, user_token)
-        elif source_type == "icloud":
+        if source_type in ("google", "apple", "icloud", "folder"):
             importer = ImporterClass(Path(directory), immich_url, user_token)
         else:
             database.update_import_job_status(job_id, "failed", f"Unknown source: {source_type}")
@@ -1911,7 +2089,7 @@ def _run_import_sync(
                 f for f in photos_dir.rglob("*")
                 if importer.is_supported_file(f) and not str(f).endswith(".json")
             ]
-        elif source_type == "apple":
+        elif source_type in ("apple", "folder"):
             photo_files = importer._scan_files()
         else:  # icloud
             photos_root = importer.find_photos_root()
@@ -1944,7 +2122,7 @@ def _run_import_sync(
                 metadata_json = importer.find_photo_metadata(photo_path)
                 metadata = importer.extract_metadata(metadata_json) if metadata_json else None
                 importer.upload_file(photo_path, metadata)
-            elif source_type == "apple":
+            elif source_type in ("apple", "folder"):
                 importer._upload_file(photo_path)
             else:  # icloud
                 importer._upload_file(photo_path, photos_root)
@@ -1987,8 +2165,8 @@ async def upload_import_files(
     """Upload files via browser and start an import job."""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
-    if source_type not in ("google", "apple", "icloud"):
-        raise HTTPException(status_code=400, detail="source_type must be google, apple, or icloud")
+    if source_type not in ("google", "apple", "icloud", "folder"):
+        raise HTTPException(status_code=400, detail="source_type must be google, apple, icloud, or folder")
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
