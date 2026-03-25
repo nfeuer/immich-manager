@@ -261,6 +261,7 @@ MIGRATIONS: List[tuple] = [
         "ALTER TABLE duplicate_groups ADD COLUMN recommended_keep_id TEXT",
         "CREATE INDEX IF NOT EXISTS idx_dup_groups_user ON duplicate_groups(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_dup_groups_scan ON duplicate_groups(scan_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_dup_groups_hash ON duplicate_groups(group_hash)",
     ]),
 ]
 
@@ -1712,7 +1713,7 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM dedup_scans WHERE user_id = ? ORDER BY started_at DESC LIMIT 1",
+                "SELECT * FROM dedup_scans WHERE user_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
                 (user_id,),
             )
             row = cursor.fetchone()
