@@ -196,6 +196,18 @@ def test_resolve_group_calls_immich_delete(client):
     assert result2['total_groups'] == 0
 
 
+def test_resolve_group_400_when_keep_not_in_group(client):
+    db = app.state.database
+    db.create_dedup_scan('s4b', 'user-123', 'deep')
+    db.save_dedup_group('s4b', 'user-123', ['a1', 'a2'], 'a1', 'hash-4b')
+    result = db.get_dedup_groups('user-123')
+    group_id = result['groups'][0]['id']
+
+    resp = client.post(f'/api/dedup/groups/{group_id}/resolve',
+                       json={'keep_asset_id': 'not-in-group'})
+    assert resp.status_code == 400
+
+
 # --- dismiss ---
 
 def test_dismiss_group(client):
@@ -209,3 +221,8 @@ def test_dismiss_group(client):
     assert resp.status_code == 200
     assert resp.json()['dismissed'] is True
     assert db.get_dedup_groups('user-123')['total_groups'] == 0
+
+
+def test_dismiss_group_404_when_not_found(client):
+    resp = client.delete('/api/dedup/groups/99999')
+    assert resp.status_code == 404

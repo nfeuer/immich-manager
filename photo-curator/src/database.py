@@ -1840,6 +1840,17 @@ class Database:
     def dismiss_dedup_group(self, group_id: int) -> None:
         self.resolve_dedup_group(group_id)  # same DB operation, different semantics
 
+    def get_dedup_group(self, group_id: int, user_id: str) -> Optional[Dict]:
+        """Fetch a single duplicate group by ID, scoped to user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM duplicate_groups WHERE id = ? AND user_id = ?",
+                (group_id, user_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def upsert_perceptual_hash(
         self, asset_id: str, user_id: str, year: int, month: int, phash: str
     ) -> None:

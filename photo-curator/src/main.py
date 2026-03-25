@@ -1220,12 +1220,13 @@ async def dedup_resolve_group(
     db = app.state.database
     if not db:
         raise HTTPException(status_code=503, detail="Service not initialized")
-    result = db.get_dedup_groups(user['id'])
-    group = next((g for g in result['groups'] if g['id'] == group_id), None)
+    group = db.get_dedup_group(group_id, user['id'])
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
     asset_ids = json.loads(group['asset_ids']) if isinstance(group['asset_ids'], str) else group['asset_ids']
+    if body.keep_asset_id not in asset_ids:
+        raise HTTPException(status_code=400, detail="keep_asset_id not in group")
     to_delete = [aid for aid in asset_ids if aid != body.keep_asset_id]
 
     user_client = ImmichClient(app.state.immich_api_url, user['access_token'], use_bearer=True)
@@ -1240,7 +1241,9 @@ async def dedup_resolve_group(
             deleted += 1
     except Exception as e:
         logger.error(f"Immich delete failed during group resolve: {e}")
-        return {"resolved": False, "error": "immich_delete_failed", "detail": str(e)}
+        if deleted > 0:
+            db.resolve_dedup_group(group_id)
+        return {"resolved": deleted > 0, "deleted_count": deleted, "error": "immich_delete_failed", "detail": str(e)}
 
     db.resolve_dedup_group(group_id)
     return {"resolved": True, "deleted_count": deleted}
@@ -1253,9 +1256,12 @@ async def dedup_dismiss_group(
     user: Dict = Depends(get_current_user),
     _role=Depends(require_role(Role.USER)),
 ):
-    db = app.state.database
+    db = getattr(app.state, 'database', None)
     if not db:
         raise HTTPException(status_code=503, detail="Service not initialized")
+    group = db.get_dedup_group(group_id, user['id'])
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
     db.dismiss_dedup_group(group_id)
     return {"dismissed": True}
 
