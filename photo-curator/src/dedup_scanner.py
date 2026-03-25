@@ -83,7 +83,7 @@ class DedupScanner:
         return scan_id
 
     async def cancel(self) -> bool:
-        if not self._current_scan_id:
+        if not self.is_running():
             return False
         self._db.update_dedup_scan(self._current_scan_id, status='cancelled')
         if self._current_task and not self._current_task.done():
@@ -231,8 +231,8 @@ class DedupScanner:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
                 f.write(resp.content)
                 tmp_path = f.name
-            img = Image.open(tmp_path)
-            return str(imagehash.phash(img))
+            with Image.open(tmp_path) as img:
+                return str(imagehash.phash(img))
         except Exception as e:
             logger.warning(f"Failed to hash {asset_id}: {e}")
             return None
