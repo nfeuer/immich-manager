@@ -225,6 +225,43 @@ MIGRATIONS: List[tuple] = [
         "CREATE INDEX IF NOT EXISTS idx_batch_errors_job ON batch_errors(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_batch_errors_asset ON batch_errors(asset_id)",
     ]),
+    # Version 9: standalone duplicate scanner tables
+    (9, "add dedup scanner tables", [
+        """CREATE TABLE IF NOT EXISTS dedup_scans (
+            id              TEXT PRIMARY KEY,
+            user_id         TEXT NOT NULL,
+            mode            TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'running',
+            date_from       TEXT,
+            date_to         TEXT,
+            total_assets    INTEGER DEFAULT 0,
+            hashed          INTEGER DEFAULT 0,
+            groups_found    INTEGER DEFAULT 0,
+            error_message   TEXT,
+            started_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            completed_at    DATETIME
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_dedup_scans_user ON dedup_scans(user_id)",
+        """CREATE TABLE IF NOT EXISTS dedup_asset_metadata (
+            asset_id         TEXT PRIMARY KEY,
+            user_id          TEXT NOT NULL,
+            filename         TEXT,
+            date_taken       TEXT,
+            width            INTEGER,
+            height           INTEGER,
+            file_size_bytes  INTEGER,
+            camera_make      TEXT,
+            camera_model     TEXT,
+            updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_dedup_meta_user ON dedup_asset_metadata(user_id)",
+        "ALTER TABLE duplicate_groups ADD COLUMN scan_id TEXT",
+        "ALTER TABLE duplicate_groups ADD COLUMN user_id TEXT",
+        "ALTER TABLE duplicate_groups ADD COLUMN resolved INTEGER DEFAULT 0",
+        "ALTER TABLE duplicate_groups ADD COLUMN recommended_keep_id TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_dup_groups_user ON duplicate_groups(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_dup_groups_scan ON duplicate_groups(scan_id)",
+    ]),
 ]
 
 
@@ -1637,3 +1674,189 @@ class Database:
             )
             row = cursor.fetchone()
             return row["asset_id"] if row else None
+
+    # ------------------------------------------------------------------
+    # Dedup Scanner
+    # ------------------------------------------------------------------
+
+    def create_dedup_scan(
+        self,
+        scan_id: str,
+        user_id: str,
+        mode: str,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO dedup_scans (id, user_id, mode, status, date_from, date_to)
+                   VALUES (?, ?, ?, 'running', ?, ?)""",
+                (scan_id, user_id, mode, date_from, date_to),
+            )
+
+    def update_dedup_scan(self, scan_id: str, **kwargs) -> None:
+        allowed = {'status', 'total_assets', 'hashed', 'groups_found', 'error_message', 'completed_at'}
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return
+        if 'status' in fields and fields['status'] in ('complete', 'failed', 'cancelled'):
+            fields.setdefault('completed_at', datetime.now().isoformat())
+        set_clause = ', '.join(f"{k} = ?" for k in fields)
+        with self._get_connection() as conn:
+            conn.execute(
+                f"UPDATE dedup_scans SET {set_clause} WHERE id = ?",
+                (*fields.values(), scan_id),
+            )
+
+    def get_dedup_scan_status(self, user_id: str) -> Optional[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM dedup_scans WHERE user_id = ? ORDER BY started_at DESC LIMIT 1",
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def upsert_dedup_asset_metadata(self, user_id: str, asset: Dict) -> None:
+        exif = asset.get('exifInfo') or {}
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO dedup_asset_metadata
+                   (asset_id, user_id, filename, date_taken, width, height,
+                    file_size_bytes, camera_make, camera_model, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(asset_id) DO UPDATE SET
+                       filename=excluded.filename, date_taken=excluded.date_taken,
+                       width=excluded.width, height=excluded.height,
+                       file_size_bytes=excluded.file_size_bytes,
+                       camera_make=excluded.camera_make, camera_model=excluded.camera_model,
+                       updated_at=CURRENT_TIMESTAMP""",
+                (
+                    asset['id'], user_id,
+                    asset.get('originalFileName'),
+                    asset.get('fileCreatedAt'),
+                    exif.get('exifImageWidth'), exif.get('exifImageHeight'),
+                    exif.get('fileSizeInByte'),
+                    exif.get('make'), exif.get('model'),
+                ),
+            )
+
+    def save_dedup_group(
+        self,
+        scan_id: str,
+        user_id: str,
+        asset_ids: List[str],
+        recommended_keep_id: str,
+        group_hash: str,
+    ) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO duplicate_groups
+                   (scan_id, user_id, group_hash, asset_ids, recommended_keep_id, resolved)
+                   VALUES (?, ?, ?, ?, ?, 0)""",
+                (scan_id, user_id, group_hash, json.dumps(asset_ids), recommended_keep_id),
+            )
+
+    def get_dedup_groups(
+        self,
+        user_id: str,
+        include_resolved: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            resolved_filter = "" if include_resolved else "AND resolved = 0"
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM duplicate_groups WHERE user_id = ? {resolved_filter}",
+                (user_id,),
+            )
+            total = cursor.fetchone()['cnt']
+
+            cursor.execute(
+                f"""SELECT id, scan_id, group_hash, asset_ids, recommended_keep_id, resolved, detected_at
+                    FROM duplicate_groups
+                    WHERE user_id = ? {resolved_filter}
+                    ORDER BY detected_at DESC LIMIT ? OFFSET ?""",
+                (user_id, limit, offset),
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        # Enrich each group with per-asset metadata
+        groups = []
+        for row in rows:
+            asset_ids = json.loads(row['asset_ids'])
+            assets = self._fetch_asset_metadata_list(asset_ids)
+            savings = sum(
+                a.get('file_size_bytes') or 0
+                for a in assets
+                if a['asset_id'] != row['recommended_keep_id']
+            )
+            groups.append({**row, 'assets': assets, 'savings_bytes': savings})
+
+        total_savings = sum(g['savings_bytes'] for g in groups)
+        total_removable = sum(len(json.loads(g['asset_ids'])) - 1 for g in groups)
+        return {
+            'groups': groups,
+            'total_groups': total,
+            'total_removable_photos': total_removable,
+            'total_savings_bytes': total_savings,
+        }
+
+    def _fetch_asset_metadata_list(self, asset_ids: List[str]) -> List[Dict]:
+        if not asset_ids:
+            return []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholders = ','.join('?' * len(asset_ids))
+            cursor.execute(
+                f"SELECT * FROM dedup_asset_metadata WHERE asset_id IN ({placeholders})",
+                asset_ids,
+            )
+            meta_map = {row['asset_id']: dict(row) for row in cursor.fetchall()}
+        return [
+            {
+                **meta_map.get(aid, {'asset_id': aid}),
+                'asset_id': aid,
+                'thumbnail_url': f'/api/thumbnail/{aid}',
+                'megapixels': round(
+                    (meta_map.get(aid, {}).get('width') or 0)
+                    * (meta_map.get(aid, {}).get('height') or 0)
+                    / 1_000_000,
+                    1,
+                ) if meta_map.get(aid, {}).get('width') else None,
+            }
+            for aid in asset_ids
+        ]
+
+    def resolve_dedup_group(self, group_id: int) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE duplicate_groups SET resolved = 1 WHERE id = ?", (group_id,)
+            )
+
+    def dismiss_dedup_group(self, group_id: int) -> None:
+        self.resolve_dedup_group(group_id)  # same DB operation, different semantics
+
+    def upsert_perceptual_hash(
+        self, asset_id: str, user_id: str, year: int, month: int, phash: str
+    ) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM photo_scores WHERE asset_id = ?", (asset_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                cursor.execute(
+                    "UPDATE photo_scores SET perceptual_hash = ? WHERE asset_id = ?",
+                    (phash, asset_id),
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO photo_scores
+                       (asset_id, user_id, year, month, score, perceptual_hash)
+                       VALUES (?, ?, ?, ?, 0.0, ?)""",
+                    (asset_id, user_id, year, month, phash),
+                )
