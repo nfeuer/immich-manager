@@ -82,6 +82,17 @@ def test_asset_to_meta_extracts_correct_fields():
     assert meta['filename'] == 'test.jpg'
 
 
+def test_score_asset_formula():
+    meta = {'width': 1920, 'height': 1080, 'file_size_bytes': 5_000_000}
+    score = DedupScanner._score_asset(meta)
+    assert score == 1920 * 1080 * 1000 + 5_000_000
+
+
+def test_score_asset_handles_missing_fields():
+    assert DedupScanner._score_asset({}) == 0
+    assert DedupScanner._score_asset({'width': 1920}) == 0  # height missing → 0
+
+
 def test_derive_phase_hashing():
     assert DedupScanner.derive_phase('running', hashed=10, total_assets=100) == 'hashing'
 
@@ -93,3 +104,8 @@ def test_derive_phase_comparing():
 def test_derive_phase_null_when_not_running():
     assert DedupScanner.derive_phase('complete', hashed=100, total_assets=100) is None
     assert DedupScanner.derive_phase('idle', hashed=0, total_assets=0) is None
+
+
+def test_derive_phase_hashing_when_total_assets_zero():
+    """A just-started scan with 0 assets should show hashing, not comparing."""
+    assert DedupScanner.derive_phase('running', hashed=0, total_assets=0) == 'hashing'

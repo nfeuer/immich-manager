@@ -159,7 +159,9 @@ class DedupScanner:
     ) -> Optional[str]:
         if status != 'running':
             return None
-        return 'comparing' if hashed >= total_assets else 'hashing'
+        if total_assets == 0 or hashed < total_assets:
+            return 'hashing'
+        return 'comparing'
 
     # ------------------------------------------------------------------
     # Private: I/O helpers
@@ -321,6 +323,7 @@ class DedupScanner:
                 return
 
             groups_data = resp.json()
+            saved_count = 0
             for group_data in groups_data:
                 asset_ids = [a['id'] for a in group_data.get('assets', [])]
                 if len(asset_ids) < 2:
@@ -331,9 +334,10 @@ class DedupScanner:
                 recommended = self._compute_recommended_keep(asset_ids, asset_meta_map)
                 group_hash = str(hash(tuple(sorted(asset_ids))))
                 self._db.save_dedup_group(scan_id, user_id, asset_ids, recommended, group_hash)
+                saved_count += 1
 
             self._db.update_dedup_scan(
-                scan_id, status='complete', groups_found=len(groups_data)
+                scan_id, status='complete', groups_found=saved_count
             )
 
         except Exception as e:
