@@ -1,0 +1,76 @@
+{
+    email {$CADDY_ACME_EMAIL}
+}
+
+# ---------------------------------------------------------------------------
+# Shared snippet: security response headers applied to all three domains
+# ---------------------------------------------------------------------------
+(security_headers) {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Shared snippet: validate immich_access_token before forwarding request.
+# Caddy calls GET /api/users/me; any 2xx means the token is valid.
+# /api/auth/validateToken was removed in Immich v2 — /api/users/me is correct.
+# ---------------------------------------------------------------------------
+(immich_auth) {
+    forward_auth immich-server:2283 {
+        uri /api/users/me
+        header_up Cookie {http.request.header.Cookie}
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Immich — main photo management app
+# ---------------------------------------------------------------------------
+immich.houseoffeuer.com {
+    import security_headers
+
+    # Rewrite Set-Cookie domain so immich_access_token is visible to all
+    # *.houseoffeuer.com subdomains. Without this, monitor and curator
+    # subdomains would never receive the cookie from the browser.
+    #
+    # The `>` prefix on the field name targets response headers (not request
+    # headers). The regex applies only when the pattern matches, so it is a
+    # no-op for cookies that don't carry immich_access_token.
+    header >Set-Cookie "(immich_access_token=[^;]+)(.*)" "$1$2; Domain=.houseoffeuer.com"
+
+    # Rate-limit login attempts: 5 per minute per IP
+    @loginPath path /api/auth/login
+    rate_limit @loginPath {
+        zone login_zone {
+            key {remote_host}
+            events 5
+            window 1m
+        }
+    }
+
+    # reverse_proxy handles WebSocket upgrade automatically (Immich uses WS
+    # for real-time notifications)
+    reverse_proxy immich-server:2283
+}
+
+# ---------------------------------------------------------------------------
+# Server Manager — admin-only. Auth gated by Caddy; role gated by the app.
+# ---------------------------------------------------------------------------
+monitor.houseoffeuer.com {
+    import security_headers
+    import immich_auth
+    reverse_proxy host.docker.internal:8080
+}
+
+# ---------------------------------------------------------------------------
+# Photo Curator — any authenticated Immich user
+# ---------------------------------------------------------------------------
+curator.houseoffeuer.com {
+    import security_headers
+    import immich_auth
+    reverse_proxy photo-curator:8081
+}
