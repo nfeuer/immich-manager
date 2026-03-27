@@ -37,9 +37,15 @@ immich.houseoffeuer.com {
     # *.houseoffeuer.com subdomains. Without this, monitor and curator
     # subdomains would never receive the cookie from the browser.
     #
-    # The `>` prefix on the field name targets response headers (not request
-    # headers). The regex applies only when the pattern matches, so it is a
-    # no-op for cookies that don't carry immich_access_token.
+    # Assumption: Immich does not set its own Domain= attribute on this cookie
+    # (which is standard behavior for same-origin cookies). If Immich ever adds
+    # Domain= to this cookie, the regex will append a second Domain= attribute.
+    # Browsers handle duplicate Domain attributes inconsistently — if this ever
+    # breaks, move the rewrite inside the reverse_proxy block using header_down
+    # to gain full control over the existing attributes.
+    #
+    # Caddy v2 note: `header >Field` targets response headers (the > prefix).
+    # `header_regexp` targets REQUEST headers only — do not use it here.
     header >Set-Cookie "(immich_access_token=[^;]+)(.*)" "$1$2; Domain=.houseoffeuer.com"
 
     # Rate-limit login attempts: 5 per minute per IP
