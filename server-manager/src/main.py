@@ -65,12 +65,14 @@ def _get_allowed_origins() -> List[str]:
     """Build allowed origins from config at startup."""
     try:
         cfg = load_config()
-        immich_url = cfg.immich.api_url.rsplit("/api", 1)[0]  # e.g. http://localhost:2283
+        immich_url = cfg.immich.api_url.rsplit("/api", 1)[0]
         origins = [
             f"http://localhost:{cfg.server.port}",
             f"http://127.0.0.1:{cfg.server.port}",
             immich_url,
         ]
+        if cfg.server.public_url:
+            origins.append(cfg.server.public_url)
         return origins
     except Exception:
         return ["http://localhost:8080", "http://127.0.0.1:8080"]

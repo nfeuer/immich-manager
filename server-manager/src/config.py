@@ -17,6 +17,7 @@ class ServerConfig(BaseModel):
     port: int = 8080
     workers: int = 2
     log_level: str = "INFO"
+    public_url: str = ""
 
 
 class ImmichConfig(BaseModel):
@@ -78,7 +79,7 @@ class EmailConfig(BaseModel):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
-    from_addr: str = Field(alias="from")
+    from_addr: str = Field(default="", alias="from")
     to: List[str] = Field(default_factory=list)
 
 
