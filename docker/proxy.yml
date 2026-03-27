@@ -1,0 +1,38 @@
+# =============================================================================
+# proxy.yml — Caddy reverse proxy
+# =============================================================================
+# Start with:
+#   docker compose --env-file docker/.env \
+#     -f docker/core.yml -f docker/proxy.yml up -d
+# =============================================================================
+
+services:
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - homelab
+
+volumes:
+  caddy_data:
+    name: caddy_data
+  caddy_config:
+    name: caddy_config
+
+networks:
+  homelab:
+    external: true
+    name: homelab
