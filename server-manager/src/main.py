@@ -72,15 +72,17 @@ def _get_allowed_origins() -> List[str]:
             immich_url,
         ]
         if cfg.server.public_url:
-            origins.append(cfg.server.public_url)
+            origins.append(cfg.server.public_url.rstrip("/"))
         return origins
     except Exception:
         return ["http://localhost:8080", "http://127.0.0.1:8080"]
 
 
+_ALLOWED_ORIGINS: List[str] = _get_allowed_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_get_allowed_origins(),
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,7 +98,7 @@ async def csrf_protection(request: Request, call_next):
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             origin = request.headers.get("Origin") or request.headers.get("Referer", "")
-            allowed = _get_allowed_origins()
+            allowed = _ALLOWED_ORIGINS
             if origin and not any(origin.startswith(o) for o in allowed):
                 logger.warning("CSRF blocked: origin=%s not in %s", origin, allowed)
                 return JSONResponse(status_code=403, content={"detail": "Cross-origin request blocked"})
