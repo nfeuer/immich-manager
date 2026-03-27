@@ -6,6 +6,7 @@ const SOURCES = [
   { id: 'google', label: 'Google Photos', desc: 'Import from a Google Takeout export' },
   { id: 'apple', label: 'Apple Photos', desc: 'Import from an Apple Photos export (File → Export Originals)' },
   { id: 'icloud', label: 'iCloud Photos', desc: 'Import from Apple data export (privacy.apple.com)' },
+  { id: 'folder', label: 'Local / External Drive', desc: 'Import photos from any folder — no special export format needed' },
 ]
 
 // Derived from SOURCES for O(1) lookup by id in step 1 and step 2

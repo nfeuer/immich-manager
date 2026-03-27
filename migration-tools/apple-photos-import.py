@@ -77,7 +77,7 @@ class ApplePhotosImporter:
 
         self.session = requests.Session()
         self.session.headers.update({
-            'x-api-key': api_key,
+            'Authorization': f'Bearer {api_key}',
             'Accept': 'application/json'
         })
 
@@ -288,7 +288,7 @@ class ApplePhotosImporter:
                         data['longitude'] = str(metadata['longitude'])
 
                 response = self.session.post(
-                    f'{self.immich_url}/api/asset/upload',
+                    f'{self.immich_url}/api/assets',
                     files=files,
                     data=data,
                     timeout=300,

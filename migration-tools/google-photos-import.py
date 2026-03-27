@@ -53,7 +53,7 @@ class GooglePhotosImporter:
         self.api_key = api_key
         self.session = requests.Session()
         self.session.headers.update({
-            'x-api-key': api_key,
+            'Authorization': f'Bearer {api_key}',
             'Accept': 'application/json'
         })
 
@@ -220,7 +220,7 @@ class GooglePhotosImporter:
 
                 # Upload to Immich
                 response = self.session.post(
-                    f'{self.immich_url}/api/asset/upload',
+                    f'{self.immich_url}/api/assets',
                     files=files,
                     data=data,
                     timeout=300  # 5 minute timeout for large files
