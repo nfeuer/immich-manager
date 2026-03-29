@@ -23,7 +23,7 @@
 # /api/auth/validateToken was removed in Immich v2 — /api/users/me is correct.
 # ---------------------------------------------------------------------------
 (immich_auth) {
-    forward_auth immich-server:2283 {
+    forward_auth immich_server:2283 {
         uri /api/users/me
         header_up Cookie {http.request.header.Cookie}
     }
@@ -62,7 +62,7 @@ http://immich.houseoffeuer.com {
 
     # reverse_proxy handles WebSocket upgrade automatically (Immich uses WS
     # for real-time notifications)
-    reverse_proxy immich-server:2283
+    reverse_proxy immich_server:2283
 }
 
 # ---------------------------------------------------------------------------
