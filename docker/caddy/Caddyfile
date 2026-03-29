@@ -1,5 +1,7 @@
 {
-    email {$CADDY_ACME_EMAIL}
+    # Cloudflare Tunnel terminates TLS externally and connects to Caddy via HTTP.
+    # Caddy does not need to manage certificates.
+    auto_https off
 }
 
 # ---------------------------------------------------------------------------
@@ -30,7 +32,7 @@
 # ---------------------------------------------------------------------------
 # Immich — main photo management app
 # ---------------------------------------------------------------------------
-immich.houseoffeuer.com {
+http://immich.houseoffeuer.com {
     import security_headers
 
     # Rewrite Set-Cookie domain so immich_access_token is visible to all
@@ -66,7 +68,7 @@ immich.houseoffeuer.com {
 # ---------------------------------------------------------------------------
 # Server Manager — admin-only. Auth gated by Caddy; role gated by the app.
 # ---------------------------------------------------------------------------
-monitor.houseoffeuer.com {
+http://monitor.houseoffeuer.com {
     import security_headers
     import immich_auth
     reverse_proxy host.docker.internal:8080
@@ -75,7 +77,7 @@ monitor.houseoffeuer.com {
 # ---------------------------------------------------------------------------
 # Photo Curator — any authenticated Immich user
 # ---------------------------------------------------------------------------
-curator.houseoffeuer.com {
+http://curator.houseoffeuer.com {
     import security_headers
     import immich_auth
     reverse_proxy photo-curator:8081
