@@ -68,7 +68,7 @@ http://immich.houseoffeuer.com {
 # ---------------------------------------------------------------------------
 # Server Manager — admin-only. Auth gated by Caddy; role gated by the app.
 # ---------------------------------------------------------------------------
-http://monitor.houseoffeuer.com {
+http://manager.houseoffeuer.com {
     import security_headers
     import immich_auth
     reverse_proxy host.docker.internal:8080

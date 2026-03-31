@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     # OpenCV runtime dependencies
     libglib2.0-0 \
+    libgl1 \
     libsm6 \
     libxext6 \
     libxrender-dev \
@@ -45,7 +46,7 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 WORKDIR /app
 
 # --- Core Python dependencies (fast to install) ---
-COPY requirements.txt .
+COPY photo-curator/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- PyTorch with CUDA 11.8 support ---
@@ -66,7 +67,8 @@ RUN pip install --no-cache-dir cmake && \
 RUN pip install --no-cache-dir face_recognition
 
 # --- Copy application code ---
-COPY . .
+COPY photo-curator/ .
+COPY shared/ /app/shared/
 
 # Create data directories
 RUN mkdir -p data/models data/curator.db.dir
