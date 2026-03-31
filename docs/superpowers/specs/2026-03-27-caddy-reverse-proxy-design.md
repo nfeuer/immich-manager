@@ -1,14 +1,14 @@
 # Caddy Reverse Proxy — Design Spec
 
 **Date:** 2026-03-27
-**Status:** Approved
+**Status:** Implemented (2026-03-30)
 
 ---
 
 ## Goal
 
 Route all three homelab services through a single Caddy reverse proxy so that
-`monitor.houseoffeuer.com` and `curator.houseoffeuer.com` are reachable
+`manager.houseoffeuer.com` and `curator.houseoffeuer.com` are reachable
 externally via the existing Cloudflare Tunnel. Auth is shared via Immich's
 JWT cookie, with role enforcement ensuring only Immich admins can access
 Server Manager.
@@ -22,30 +22,38 @@ Browser
   └── Cloudflare (DDoS protection, hides real IP)
         └── Cloudflare Tunnel (outbound-only, no open inbound ports)
               └── Caddy [Docker container, homelab network, port 80]
-                    ├── immich.houseoffeuer.com  → immich-server:2283   (Docker, homelab network)
-                    ├── monitor.houseoffeuer.com → host.docker.internal:8080  (Server Manager, systemd)
-                    └── curator.houseoffeuer.com → photo-curator:8081   (Docker, homelab network)
+                    ├── immich.houseoffeuer.com   → immich_server:2283   (Docker, homelab network)
+                    ├── manager.houseoffeuer.com  → host.docker.internal:8080  (Server Manager, systemd)
+                    └── curator.houseoffeuer.com  → photo-curator:8081   (Docker, homelab network)
 ```
 
 ### Service deployment types
 
 | Service | Deployment | Caddy reaches it via |
 |---|---|---|
-| Immich | Docker container (`immich-server`) | Container name on homelab network |
+| Immich | Docker container (`immich_server`) | Container name on homelab network |
 | Server Manager | systemd on host (port 8080) | `host.docker.internal:8080` |
 | Photo Curator | Docker container (`photo-curator`) | Container name on homelab network |
+
+Note: The existing Immich container uses underscore naming (`immich_server`, `immich_postgres`,
+`immich_redis`) — it predates this project. Caddy's Caddyfile uses `immich_server:2283`.
 
 ### Network access model
 
 - **No open inbound firewall ports required.** The Cloudflare Tunnel makes an
   outbound connection; UFW never needs to open 443. Note: Docker manages its
-  own iptables rules independently of UFW, so Docker-to-host communication on
-  port 8080 (Server Manager) works without UFW changes.
+  own iptables rules independently of UFW for container-to-container traffic,
+  but packets from a Docker bridge network to the host (Caddy → Server Manager
+  on port 8080) are subject to UFW's INPUT chain. A UFW rule is required:
+  `sudo ufw allow from 172.20.0.0/16 to any port 8080`
+  (substitute the actual homelab bridge CIDR if it differs).
 - **Immich decoupled from host.** Port 2283 moves from `127.0.0.1:2283`
   (host-bound) to Docker-network-internal only (`expose: ["2283"]`). The host
   can no longer reach Immich directly.
-- **Server Manager remains localhost-only.** Only reachable via
-  `host.docker.internal` from Caddy. LAN peers cannot reach it directly.
+- **Server Manager must bind to `0.0.0.0`.** The systemd unit's `ExecStart`
+  flag `--host` overrides `config.yaml`. Change it to `--host 0.0.0.0` so
+  Caddy can reach it via `host.docker.internal`. LAN peers still cannot reach
+  it directly because port 8080 is not forwarded through the firewall.
 
 ---
 
@@ -60,8 +68,10 @@ Browser
    and rewrites it using a regex replacement to append
    `Domain=.houseoffeuer.com`. The cookie is now visible to all
    `*.houseoffeuer.com` subdomains.
-   - Caddy v2 directive: `header_down Set-Cookie "(immich_access_token=[^;]+)(.*)" "$1$2; Domain=.houseoffeuer.com"`
-   - This is a string replacement, not an `add` sub-directive.
+   - Caddy v2 directive (site block level): `header >Set-Cookie "(immich_access_token=[^;]+)(.*)" "$1$2; Domain=.houseoffeuer.com"`
+   - The `>` prefix targets response headers. `header_down` is only valid
+     inside a `reverse_proxy` sub-block, not at the site block level.
+   - This is a regex replacement, not an `add` sub-directive.
 4. Cookie attributes preserved plus added: `HttpOnly`, `Secure`, `SameSite=Lax`,
    `Domain=.houseoffeuer.com`.
 
@@ -82,14 +92,14 @@ Server Manager happens inside the Server Manager application itself — Caddy
 cannot parse the JSON response body from `/api/users/me` to check `isAdmin`.
 
 ```
-Browser → monitor.houseoffeuer.com (sends immich_access_token cookie)
-  └── Caddy forward_auth → GET immich-server:2283/api/users/me
+Browser → manager.houseoffeuer.com (sends immich_access_token cookie)
+  └── Caddy forward_auth → GET immich_server:2283/api/users/me
         ├── 200 (valid token) → forward to Server Manager
         │     └── Server Manager checks isAdmin → 403 if not admin
         └── 401 (invalid/expired) → redirect to Immich login
 
 Browser → curator.houseoffeuer.com (sends immich_access_token cookie)
-  └── Caddy forward_auth → GET immich-server:2283/api/users/me
+  └── Caddy forward_auth → GET immich_server:2283/api/users/me
         ├── 200 (valid token, any authenticated user) → forward to Photo Curator ✓
         └── 401 (invalid/expired) → redirect to Immich login
 ```
@@ -157,11 +167,12 @@ stock `caddy:2-alpine` image). See `docker/proxy.yml` build configuration.
 | `docker/proxy.yml` | Create | Caddy service; joins homelab network; `extra_hosts: host.docker.internal:host-gateway`; custom xcaddy build for rate limiting. Start with: `docker compose --env-file docker/.env -f docker/core.yml -f docker/proxy.yml up -d` |
 | `docker/caddy/Dockerfile` | Create | `xcaddy` build with `caddy-ratelimit` plugin |
 | `docker/caddy/Caddyfile` | Create | Routing, forward_auth, cookie rewrite, security headers, rate limiting |
-| `docker/immich.yml` | Modify | Replace `ports: - "127.0.0.1:2283:2283"` with `expose: ["2283"]` |
-| `docker/photo-curator.yml` | Modify | Replace `ports: - "8081:8081"` with `expose: ["8081"]` — removes direct LAN access, all traffic goes through Caddy |
+| `docker/photo-curator.yml` | Modify | Replace `ports: - "8081:8081"` with `expose: ["8081"]`; widen build context to `..` so `shared/` is reachable |
+| `photo-curator/Dockerfile` | Modify | Add `libgl1` (OpenCV dep); update `COPY` for widened context; add `COPY shared/ /app/shared/` |
 | `/etc/cloudflared/config.yml` | Modify | Single wildcard ingress entry pointing to `http://localhost:80`; remove per-service entries |
 | `docker/.env.example` | Update | Uncomment `CADDY_ACME_EMAIL` and `BASE_DOMAIN` |
-| Server Manager config | Update | Add `https://monitor.houseoffeuer.com` to the allowed origins list used by the CSRF middleware (`_get_allowed_origins()`), otherwise all POST/PUT/DELETE requests from the browser will be rejected with 403 |
+| Server Manager config | Update | Add `https://manager.houseoffeuer.com` to CSRF allowed origins (`_get_allowed_origins()`), otherwise all POST/PUT/DELETE requests will be rejected with 403 |
+| `/etc/systemd/system/immich-server-manager.service` | Modify | Change `--host 127.0.0.1` → `--host 0.0.0.0` in `ExecStart`; this flag overrides `config.yaml` and must be set for Caddy to reach the service via `host.docker.internal` |
 
 ---
 
@@ -197,11 +208,11 @@ Snippets
 
 immich.houseoffeuer.com
   ├── import security_headers
-  ├── reverse_proxy immich-server:2283  (WebSocket upgrade handled automatically)
-  ├── header_down Set-Cookie: regex rewrite to add Domain=.houseoffeuer.com
+  ├── reverse_proxy immich_server:2283  (WebSocket upgrade handled automatically)
+  ├── header >Set-Cookie: regex rewrite to add Domain=.houseoffeuer.com
   └── rate_limit /api/auth/login: 5 req/min per IP (requires caddy-ratelimit plugin)
 
-monitor.houseoffeuer.com
+manager.houseoffeuer.com
   ├── import security_headers
   ├── import immich_auth
   └── reverse_proxy host.docker.internal:8080

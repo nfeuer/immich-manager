@@ -2,11 +2,27 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Route all three homelab services through Caddy so `monitor.houseoffeuer.com` and `curator.houseoffeuer.com` are reachable via the existing Cloudflare Tunnel with shared Immich auth and role-based access control.
+**Goal:** Route all three homelab services through Caddy so `manager.houseoffeuer.com` and `curator.houseoffeuer.com` are reachable via the existing Cloudflare Tunnel with shared Immich auth and role-based access control.
 
 **Architecture:** A custom-built Caddy container (with `caddy-ratelimit` plugin via xcaddy) joins the homelab Docker network and routes by subdomain. It validates every request to protected services against Immich's `/api/users/me` using `forward_auth`, and rewrites Immich's login cookie domain to `.houseoffeuer.com` so all three subdomains share the session.
 
 **Tech Stack:** Caddy v2 (xcaddy custom build), `caddy-ratelimit` plugin, Docker Compose multi-file pattern, Cloudflare Tunnel (cloudflared), FastAPI (Server Manager), Python pytest.
+
+---
+
+## Deployment Notes (actual implementation, 2026-03-30)
+
+Deviations from this plan discovered during deployment:
+
+- **`monitor` renamed to `manager`** — more consistent with existing naming (`immich-server-manager`).
+- **Existing Immich container uses underscores** — the real Immich instance is `immich_server` (underscore), not `immich-server`. Caddyfile and all references use `immich_server:2283`. Running `docker compose up` on `docker/immich.yml` created a second empty Immich instance; the orphaned containers (`immich-server`, `immich-postgres`, `immich-redis`) were cleaned up after the real data was restored.
+- **`header_down` invalid at site block level** — `header_down` only works inside a `reverse_proxy` sub-block. The correct Caddy v2 syntax for response header modification at the site block level is `header >Set-Cookie "pattern" "replacement"` (the `>` prefix).
+- **TLS: `auto_https off` instead of `local_certs`** — Cloudflare Tunnel connects to Caddy via plain HTTP on port 80. Caddy does not need to manage certificates. All site addresses use the `http://` scheme.
+- **UFW blocks Docker bridge → host on port 8080** — packets from inside the Caddy container to `host.docker.internal:8080` are subject to UFW's INPUT chain. Required: `sudo ufw allow from 172.20.0.0/16 to any port 8080`.
+- **Server Manager systemd unit hardcodes `--host 127.0.0.1`** — this flag in `ExecStart` overrides `config.yaml`. Must be changed to `--host 0.0.0.0` for Caddy to reach it via `host.docker.internal`. `config.yaml` alone is not sufficient.
+- **Photo Curator missing `libgl1`** — OpenCV (`cv2`) requires `libgl1` which was absent from the Docker image. Added to the `apt-get install` list in `photo-curator/Dockerfile`.
+- **Photo Curator `shared/` module not in build context** — `photo-curator/src/auth.py` imports from `shared/` which lives at the project root. The build context was widened from `../photo-curator` to `..` (project root) and `COPY` directives updated accordingly.
+- **`docker/immich.yml` not used** — the existing Immich stack runs from `/home/feuer/Documents/Projects/Immich/immich-app` with its own compose file. `docker/immich.yml` is unused.
 
 ---
 
