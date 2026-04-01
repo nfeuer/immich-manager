@@ -219,7 +219,8 @@ async def startup_event():
         # Initialize Immich authentication
         immich_config = config.get("immich", {})
         immich_base_url = immich_config.get("base_url", "http://localhost:2283")
-        app.state.immich_auth = ImmichAuth(immich_base_url)
+        immich_external_url = immich_config.get("external_url", immich_base_url)
+        app.state.immich_auth = ImmichAuth(immich_base_url, immich_external_url)
         app.state.immich_api_url = immich_config.get("api_url", f"{immich_base_url}/api")
         app.state.immich_base_url = immich_base_url  # Store for email links
 
@@ -412,12 +413,12 @@ async def check_auth(user: Optional[Dict] = Depends(get_current_user_optional)):
                 "name": user.get("name")
             },
             "role": local.get("role", "user"),
-            "logout_url": f"{immich_auth.immich_url}/auth/logout",
+            "logout_url": f"{immich_auth._immich_url_for_request(request)}/auth/logout",
         }
     else:
         return {
             "authenticated": False,
-            "login_url": f"{immich_auth.immich_url}/auth/login"
+            "login_url": f"{immich_auth._immich_url_for_request(request)}/auth/login"
         }
 
 
@@ -425,7 +426,7 @@ async def check_auth(user: Optional[Dict] = Depends(get_current_user_optional)):
 async def logout(request: Request):
     """Redirect to Immich logout page"""
     immich_auth = request.app.state.immich_auth
-    return RedirectResponse(url=f"{immich_auth.immich_url}/auth/logout")
+    return RedirectResponse(url=f"{immich_auth._immich_url_for_request(request)}/auth/logout")
 
 
 async def require_user_page(request: Request):
@@ -437,7 +438,7 @@ async def require_user_page(request: Request):
     user = immich_auth.get_user_from_request(request)
     if not user:
         raise NotAuthenticatedException(
-            immich_login_url=f"{immich_auth.immich_url}/auth/login",
+            immich_login_url=f"{immich_auth._immich_url_for_request(request)}/auth/login",
             curator_url=str(request.url),
         )
     db = getattr(request.app.state, "database", None)

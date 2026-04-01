@@ -323,7 +323,7 @@ async def check_disk_health_job():
         return
 
     try:
-        disks = disk_monitor.check_all_disks()
+        disks = await asyncio.to_thread(disk_monitor.check_all_disks)
 
         for disk in disks:
             # Record to database
@@ -369,7 +369,7 @@ async def collect_metrics_job():
         return
 
     try:
-        metrics = system_monitor.get_all_metrics()
+        metrics = await asyncio.to_thread(system_monitor.get_all_metrics)
         database.record_system_metrics(metrics)
 
         # Check thresholds
@@ -402,7 +402,7 @@ async def backup_job():
 
     try:
         print(f"Starting scheduled backup at {datetime.now()}")
-        result = backup_manager.run_full_backup()
+        result = await asyncio.to_thread(backup_manager.run_full_backup)
 
         # Record to database
         database.record_backup(
@@ -417,7 +417,10 @@ async def backup_job():
         # Send alert
         await alert_manager.send_backup_alert(result['database'])
 
-        print(f"Backup completed: {result['status']}")
+        if result['status'] == 'failed':
+            print(f"Backup completed: failed — {result.get('database', {}).get('error', 'unknown error')}")
+        else:
+            print(f"Backup completed: {result['status']}")
 
     except Exception as e:
         print(f"Error in backup job: {e}")

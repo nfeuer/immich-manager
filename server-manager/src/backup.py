@@ -95,12 +95,25 @@ class BackupManager:
             if not container_name:
                 raise Exception("PostgreSQL container not found")
 
+            # Read the actual POSTGRES_USER from the container rather than
+            # assuming "postgres" — Immich sets this via DB_USERNAME in .env
+            env_result = subprocess.run(
+                ['docker', 'inspect', '--format',
+                 '{{range .Config.Env}}{{println .}}{{end}}', container_name],
+                capture_output=True, text=True, check=True, env=CLEAN_ENV,
+            )
+            db_username = 'postgres'
+            for line in env_result.stdout.splitlines():
+                if line.startswith('POSTGRES_USER='):
+                    db_username = line.split('=', 1)[1]
+                    break
+
             # Dump database
             with open(backup_file, 'w') as f:
                 subprocess.run(
                     [
                         'docker', 'exec', container_name,
-                        'pg_dump', '-U', 'postgres', 'immich'
+                        'pg_dump', '-U', db_username, 'immich'
                     ],
                     stdout=f,
                     stderr=subprocess.PIPE,

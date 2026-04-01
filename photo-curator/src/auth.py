@@ -21,15 +21,20 @@ logger = logging.getLogger(__name__)
 class ImmichAuth:
     """Handles Immich authentication and session validation"""
 
-    def __init__(self, immich_url: str):
+    def __init__(self, immich_url: str, external_url: Optional[str] = None, localhost_port: int = 2283):
         """
         Initialize auth handler
 
         Args:
-            immich_url: Base URL of Immich instance (e.g., http://localhost:2283)
+            immich_url: Internal URL for server-side API calls (e.g., http://immich_server:2283)
+            external_url: Browser-facing URL for login/logout redirects when accessed via non-localhost
+                          (e.g., https://immich.houseoffeuer.com). Defaults to immich_url if not set.
+            localhost_port: Immich port to use when request comes from localhost (default: 2283)
         """
         self.immich_url = immich_url.rstrip('/')
         self.api_url = f"{self.immich_url}/api"
+        self.external_url = (external_url or immich_url).rstrip('/')
+        self.localhost_port = localhost_port
 
     def get_user_from_request(self, request: Request) -> Optional[Dict[str, Any]]:
         """
@@ -71,6 +76,17 @@ class ImmichAuth:
 
         return None
 
+    def _immich_url_for_request(self, request: Request) -> str:
+        """Return the browser-facing Immich URL appropriate for this request's origin.
+
+        Localhost requests use http://localhost:<port> so direct connections work.
+        All other requests (e.g. Cloudflare tunnel) use the configured external_url.
+        """
+        host = request.headers.get("host", "").split(":")[0]
+        if host in ("localhost", "127.0.0.1"):
+            return f"http://localhost:{self.localhost_port}"
+        return self.external_url
+
     def login_redirect_url(self, request: Request) -> str:
         """
         Get URL to redirect to Immich login
@@ -81,12 +97,8 @@ class ImmichAuth:
         Returns:
             Immich login URL with return path
         """
-        # Use the full URL so Immich redirects back to photo-curator after login,
-        # not back to Immich's own root
         return_url = str(request.url)
-
-        # Immich login URL
-        return f"{self.immich_url}/auth/login?returnUrl={return_url}"
+        return f"{self._immich_url_for_request(request)}/auth/login?returnUrl={return_url}"
 
 
 async def get_current_user(
