@@ -263,6 +263,10 @@ MIGRATIONS: List[tuple] = [
         "CREATE INDEX IF NOT EXISTS idx_dup_groups_scan ON duplicate_groups(scan_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_dup_groups_hash ON duplicate_groups(group_hash)",
     ]),
+    (10, "add albums_created and current_file to import_jobs", [
+        "ALTER TABLE import_jobs ADD COLUMN albums_created INTEGER DEFAULT 0",
+        "ALTER TABLE import_jobs ADD COLUMN current_file TEXT DEFAULT ''",
+    ]),
 ]
 
 
@@ -1476,7 +1480,8 @@ class Database:
             cursor = conn.cursor()
             fields = []
             values: list = []
-            for col in ("total_files", "uploaded", "skipped", "errors", "duplicates"):
+            for col in ("total_files", "uploaded", "skipped", "errors", "duplicates",
+                        "albums_created", "current_file"):
                 if col in stats:
                     fields.append(f"{col} = ?")
                     values.append(stats[col])
