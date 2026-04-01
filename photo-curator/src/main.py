@@ -1494,6 +1494,8 @@ class RoleUpdate(BaseModel):
 class ServerPathImport(BaseModel):
     source_type: str  # "google", "apple", "icloud"
     server_path: str  # Filesystem path on server
+    create_albums: bool = False
+    root_album: bool = False
 
 
 # ------------------------------------------------------------------
@@ -2004,6 +2006,8 @@ def _run_import_sync(
     source_type: str,
     directory: str,
     import_method: str,
+    create_albums: bool = False,
+    root_album: bool = False,
 ):
     """Run an import job synchronously (called via BackgroundTasks)."""
     try:
@@ -2012,7 +2016,15 @@ def _run_import_sync(
 
         # Create importer — SSO token works as api_key for Immich API
         if source_type in ("google", "apple", "icloud", "folder"):
-            importer = ImporterClass(Path(directory), immich_url, user_token)
+            if source_type == "folder":
+                importer = ImporterClass(
+                    Path(directory), immich_url, user_token,
+                    create_albums=create_albums,
+                    root_album=root_album,
+                    skip_root_folder=(import_method == "upload"),
+                )
+            else:
+                importer = ImporterClass(Path(directory), immich_url, user_token)
         else:
             database.update_import_job_status(job_id, "failed", f"Unknown source: {source_type}")
             return
@@ -2048,6 +2060,9 @@ def _run_import_sync(
             ]
 
         importer.stats["total_files"] = len(photo_files)
+        if source_type == "folder" and create_albums:
+            from math import ceil
+            importer._total_batches = ceil(len(photo_files) / 25) if photo_files else 0
         database.update_import_job_progress(job_id, {**importer.stats, "status": "running"})
 
         if not photo_files:
@@ -2065,7 +2080,17 @@ def _run_import_sync(
                 metadata_json = importer.find_photo_metadata(photo_path)
                 metadata = importer.extract_metadata(metadata_json) if metadata_json else None
                 importer.upload_file(photo_path, metadata)
-            elif source_type in ("apple", "folder"):
+            elif source_type == "folder":
+                asset_id = importer._upload_file(photo_path)
+                importer.stats['current_file'] = photo_path.name
+                if asset_id and create_albums:
+                    for album_name in importer._get_album_names(photo_path):
+                        importer._album_buffer.setdefault(album_name, []).append(asset_id)
+                importer._files_since_flush += 1
+                if importer._files_since_flush >= 25:
+                    importer._flush_albums()
+                    importer._files_since_flush = 0
+            elif source_type == "apple":
                 importer._upload_file(photo_path)
             else:  # icloud
                 importer._upload_file(photo_path, photos_root)
@@ -2074,7 +2099,9 @@ def _run_import_sync(
             if (i + 1) % 10 == 0:
                 database.update_import_job_progress(job_id, importer.stats)
         else:
-            # Loop completed without cancel
+            # Loop completed without cancellation — flush tail batch then mark done
+            if source_type == "folder" and create_albums:
+                importer._flush_albums()
             database.update_import_job_progress(
                 job_id, {**importer.stats, "status": "completed"}
             )
@@ -2104,6 +2131,8 @@ async def upload_import_files(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     user: Dict = Depends(get_current_user),
     _role=Depends(require_role(Role.USER)),
+    create_albums: bool = Form(False),
+    root_album: bool = Form(False),
 ):
     """Upload files via browser and start an import job."""
     if not database:
@@ -2142,6 +2171,7 @@ async def upload_import_files(
         _run_import_sync,
         job_id, user["id"], user["access_token"],
         source_type, str(staging_dir), "upload",
+        create_albums, root_album,
     )
 
     return {"job_id": job_id, "status": "started", "file_count": len(files)}
@@ -2159,8 +2189,8 @@ async def start_server_path_import(
     """Start an import from a server filesystem path (admin only)."""
     if not database:
         raise HTTPException(status_code=503, detail="Database not initialized")
-    if body.source_type not in ("google", "apple", "icloud"):
-        raise HTTPException(status_code=400, detail="source_type must be google, apple, or icloud")
+    if body.source_type not in ("google", "apple", "icloud", "folder"):
+        raise HTTPException(status_code=400, detail="source_type must be google, apple, icloud, or folder")
 
     server_path = Path(body.server_path)
     if not server_path.exists() or not server_path.is_dir():
@@ -2182,6 +2212,7 @@ async def start_server_path_import(
         _run_import_sync,
         job_id, user["id"], user["access_token"],
         body.source_type, resolved, "server_path",
+        body.create_albums, body.root_album,
     )
 
     return {"job_id": job_id, "status": "started"}

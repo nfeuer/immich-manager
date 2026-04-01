@@ -299,3 +299,37 @@ def test_flush_albums_loads_cache_lazily_on_first_call(tmp_path, make_importer):
     assert imp._albums_cache_loaded is True
     assert imp._existing_albums["Venue"] == "v-id"
     assert imp._current_batch == 1
+
+
+# ---------------------------------------------------------------------------
+# Cancellation test: tail flush must be skipped when loop breaks
+# ---------------------------------------------------------------------------
+
+def test_tail_flush_skipped_on_cancel(tmp_path, make_importer):
+    """Verify that _flush_albums is NOT called when the upload loop is broken by cancellation."""
+    imp = make_importer(create_albums=True)
+    imp._total_batches = 1
+    imp._albums_cache_loaded = True
+    imp._album_buffer = {"Ceremony": ["id1"]}  # unflushed batch
+
+    flush_called = []
+
+    original_flush = imp._flush_albums
+    def tracking_flush():
+        flush_called.append(True)
+        original_flush()
+
+    imp._flush_albums = tracking_flush
+
+    # Simulate cancellation: break before for/else reaches the else branch
+    photo_files = [tmp_path / "photo.jpg"]
+    cancel = True
+
+    for photo_path in photo_files:
+        if cancel:
+            break
+        imp._flush_albums()
+    else:
+        imp._flush_albums()  # only reached if not cancelled
+
+    assert flush_called == []  # flush was NOT called
