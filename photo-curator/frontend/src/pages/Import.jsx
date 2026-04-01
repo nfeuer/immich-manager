@@ -7,6 +7,7 @@ const SOURCES = [
   { id: 'apple', label: 'Apple Photos', desc: 'Import from an Apple Photos export (File → Export Originals)' },
   { id: 'icloud', label: 'iCloud Photos', desc: 'Import from Apple data export (privacy.apple.com)' },
   { id: 'folder', label: 'Local / External Drive', desc: 'Import photos from any folder — no special export format needed' },
+  { id: 'server_path', label: 'Server Path (Large Import)', desc: 'Admin only — import directly from a directory already on the server. Best for 10k+ photos.', adminOnly: true },
 ]
 
 // Derived from SOURCES for O(1) lookup by id in step 1 and step 2
@@ -15,11 +16,26 @@ const SOURCE_LABELS = Object.fromEntries(SOURCES.map(s => [s.id, s.label]))
 const TERMINAL = ['completed', 'failed', 'cancelled']
 
 export default function Import() {
+  const authQuery = useQuery({
+    queryKey: ['authCheck'],
+    queryFn: () => apiFetch('/api/auth/check'),
+    staleTime: 60_000,
+  })
+  const isAdmin = authQuery.data?.role === 'admin'
+
   const [step, setStep] = useState(0)
   const [source, setSource] = useState(null)
   const [files, setFiles] = useState(null)
   const [dragOver, setDragOver] = useState(false)
+  const [serverPath, setServerPath] = useState('')
+  const [serverPathSourceType, setServerPathSourceType] = useState('folder')
+  const [createAlbums, setCreateAlbums] = useState(false)
+  const [rootAlbum, setRootAlbum] = useState(false)
   const fileInputRef = useRef(null)
+
+  const rootFolderName = source === 'server_path'
+    ? serverPath.split('/').filter(Boolean).pop() ?? ''
+    : (files?.[0]?.webkitRelativePath?.split('/')[0] ?? '')
 
   const handleFileChange = (e) => {
     const f = e.target.files
@@ -65,6 +81,8 @@ export default function Import() {
     mutationFn: async () => {
       const formData = new FormData()
       formData.append('source_type', source)
+      formData.append('create_albums', createAlbums)
+      formData.append('root_album', rootAlbum)
       for (const file of files) {
         formData.append('files', file, file.webkitRelativePath || file.name)
       }
@@ -78,6 +96,25 @@ export default function Import() {
         throw new Error(err.detail || `Upload failed (${res.status})`)
       }
       return res.json()
+    },
+    onSuccess: (data) => {
+      setJobId(data.job_id)
+      setStep(2)
+    },
+  })
+
+  const serverPathMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch('/api/import/start', {
+        method: 'POST',
+        body: JSON.stringify({
+        source_type: serverPathSourceType,
+        server_path: serverPath,
+        create_albums: createAlbums,
+        root_album: rootAlbum,
+      }),
+      })
+      return res
     },
     onSuccess: (data) => {
       setJobId(data.job_id)
@@ -99,7 +136,12 @@ export default function Import() {
     setSource(null)
     setFiles(null)
     setJobId(null)
+    setServerPath('')
+    setServerPathSourceType('folder')
+    setCreateAlbums(false)
+    setRootAlbum(false)
     uploadMutation.reset()
+    serverPathMutation.reset()
   }
 
   const job = jobQuery.data
@@ -111,7 +153,7 @@ export default function Import() {
 
       {step === 0 && (
         <div className="space-y-3">
-          {SOURCES.map(s => (
+          {SOURCES.filter(s => !s.adminOnly || isAdmin).map(s => (
             <button
               key={s.id}
               onClick={() => { setSource(s.id); setStep(1) }}
@@ -124,7 +166,7 @@ export default function Import() {
         </div>
       )}
 
-      {step === 1 && (
+      {step === 1 && source !== 'server_path' && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
             <button
@@ -167,6 +209,31 @@ export default function Import() {
             <p className="text-immich-text text-sm">{files.length} files ready to import</p>
           )}
 
+          {source === 'folder' && (
+            <div className="space-y-2 pt-1">
+              <label className="flex items-center gap-2 text-immich-text text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={createAlbums}
+                  onChange={e => { setCreateAlbums(e.target.checked); if (!e.target.checked) setRootAlbum(false) }}
+                  className="rounded"
+                />
+                Create albums from subfolders
+              </label>
+              {createAlbums && (
+                <label className="flex items-center gap-2 text-immich-text text-sm cursor-pointer ml-5">
+                  <input
+                    type="checkbox"
+                    checked={rootAlbum}
+                    onChange={e => setRootAlbum(e.target.checked)}
+                    className="rounded"
+                  />
+                  Add loose photos to a &ldquo;{rootFolderName || 'root'}&rdquo; album
+                </label>
+              )}
+            </div>
+          )}
+
           {uploadMutation.error && (
             <p className="text-red-400 text-sm">{uploadMutation.error.message}</p>
           )}
@@ -178,6 +245,86 @@ export default function Import() {
             className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40"
           >
             Start Import
+          </button>
+        </div>
+      )}
+
+      {step === 1 && source === 'server_path' && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <button onClick={() => setStep(0)} className="text-immich-primary text-sm hover:underline">
+              ← Back
+            </button>
+            <span className="text-immich-muted text-sm">Server Path Import</span>
+          </div>
+
+          <div className="p-4 bg-immich-surface rounded-xl border border-immich-border space-y-4">
+            <div>
+              <p className="text-immich-text text-sm font-medium mb-1">Server directory path</p>
+              <p className="text-immich-muted text-xs mb-2">
+                The photos must already be on the server (e.g. copied via rsync). The server will read
+                directly from this path — nothing is re-uploaded through the browser.
+              </p>
+              <input
+                data-testid="server-path-input"
+                type="text"
+                placeholder="/opt/photos-import"
+                value={serverPath}
+                onChange={(e) => setServerPath(e.target.value)}
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm font-mono placeholder:text-immich-muted focus:outline-none focus:border-immich-primary"
+              />
+            </div>
+
+            <div>
+              <p className="text-immich-text text-sm font-medium mb-1">Photo source format</p>
+              <select
+                data-testid="server-path-source-type"
+                value={serverPathSourceType}
+                onChange={(e) => setServerPathSourceType(e.target.value)}
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus:border-immich-primary"
+              >
+                <option value="folder">Plain folder (any photos, no special format)</option>
+                <option value="google">Google Takeout export</option>
+                <option value="apple">Apple Photos export</option>
+                <option value="icloud">iCloud data export</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-immich-text text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={createAlbums}
+                  onChange={e => { setCreateAlbums(e.target.checked); if (!e.target.checked) setRootAlbum(false) }}
+                  className="rounded"
+                />
+                Create albums from subfolders
+              </label>
+              {createAlbums && (
+                <label className="flex items-center gap-2 text-immich-text text-sm cursor-pointer ml-5">
+                  <input
+                    type="checkbox"
+                    checked={rootAlbum}
+                    onChange={e => setRootAlbum(e.target.checked)}
+                    className="rounded"
+                  />
+                  Add loose photos to a &ldquo;{rootFolderName || 'root'}&rdquo; album
+                </label>
+              )}
+            </div>
+          </div>
+
+          {serverPathMutation.error && (
+            <p className="text-red-400 text-sm">{serverPathMutation.error.message}</p>
+          )}
+
+          <button
+            data-testid="btn-start-import"
+            disabled={!serverPath.trim() || serverPathMutation.isPending}
+            onClick={() => serverPathMutation.mutate()}
+            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40"
+          >
+            {serverPathMutation.isPending ? 'Starting…' : 'Start Import'}
           </button>
         </div>
       )}
@@ -214,13 +361,29 @@ export default function Import() {
                       }}
                     />
                   </div>
+                  <div className="flex items-center justify-between text-xs text-immich-muted mt-1">
+                    <span>
+                      {job.status === 'scanning' && 'Scanning\u2026'}
+                      {job.status === 'running' && 'Uploading\u2026'}
+                      {job.status === 'completed' && 'Done'}
+                      {job.status === 'failed' && 'Failed'}
+                      {job.status === 'cancelled' && 'Cancelled'}
+                    </span>
+                    {isJobRunning && job.current_file && (
+                      <span className="font-mono truncate max-w-xs">{job.current_file}</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Stats grid */}
-                <div className="grid grid-cols-4 gap-3 text-center">
+                <div className="grid grid-cols-5 gap-3 text-center">
                   <div>
                     <p data-testid="stat-uploaded" className="text-xl font-bold text-green-400">{job.uploaded ?? 0}</p>
                     <p className="text-xs text-immich-muted">Uploaded</p>
+                  </div>
+                  <div>
+                    <p data-testid="stat-albums" className="text-xl font-bold text-blue-400">{job.albums_created ?? 0}</p>
+                    <p className="text-xs text-immich-muted">Albums</p>
                   </div>
                   <div>
                     <p data-testid="stat-duplicates" className="text-xl font-bold text-yellow-400">{job.duplicates ?? 0}</p>
