@@ -400,9 +400,9 @@ async def send_monthly_reminders():
 
 # Authentication check endpoint
 @app.get("/api/auth/check")
-async def check_auth(user: Optional[Dict] = Depends(get_current_user_optional)):
+async def check_auth(request: Request, user: Optional[Dict] = Depends(get_current_user_optional)):
     """Check if user is authenticated, including role info"""
-    immich_auth = app.state.immich_auth
+    immich_auth = request.app.state.immich_auth
     if user:
         local = user.get("_local_user", {})
         return {
