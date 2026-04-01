@@ -97,7 +97,10 @@ class ImmichAuth:
         Returns:
             Immich login URL with return path
         """
-        return_url = str(request.url)
+        # Use the Referer (the SPA page) as returnUrl so Immich redirects back to the
+        # React app, not a raw API endpoint. Fall back to the app root.
+        app_root = f"{request.url.scheme}://{request.url.netloc}"
+        return_url = request.headers.get("referer", app_root)
         return f"{self._immich_url_for_request(request)}/auth/login?returnUrl={return_url}"
 
 
