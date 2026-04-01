@@ -94,3 +94,127 @@ def test_update_import_job_progress_syncs_current_file(db):
     db.update_import_job_progress(job_id, {"current_file": "photo.jpg"})
     job = db.get_import_job(job_id)
     assert job["current_file"] == "photo.jpg"
+
+
+# ---------------------------------------------------------------------------
+# _get_album_names tests
+# ---------------------------------------------------------------------------
+
+def test_get_album_names_single_level_server_path(tmp_path, make_importer):
+    imp = make_importer(skip_root_folder=False)
+    f = tmp_path / "Ceremony" / "photo.jpg"
+    assert imp._get_album_names(f) == ["Ceremony"]
+
+
+def test_get_album_names_two_levels_server_path(tmp_path, make_importer):
+    imp = make_importer(skip_root_folder=False)
+    f = tmp_path / "Ceremony" / "Church" / "photo.jpg"
+    assert imp._get_album_names(f) == ["Ceremony", "Church"]
+
+
+def test_get_album_names_file_in_root_no_root_album(tmp_path, make_importer):
+    imp = make_importer(skip_root_folder=False, root_album=False)
+    f = tmp_path / "photo.jpg"
+    assert imp._get_album_names(f) == []
+
+
+def test_get_album_names_file_in_root_with_root_album(tmp_path, make_importer):
+    imp = make_importer(skip_root_folder=False, root_album=True)
+    f = tmp_path / "photo.jpg"
+    assert imp._get_album_names(f) == [tmp_path.name]
+
+
+def test_get_album_names_browser_upload_single_level(tmp_path, make_importer):
+    imp = make_importer(skip_root_folder=True)
+    f = tmp_path / "Wedding Photos" / "Ceremony" / "photo.jpg"
+    assert imp._get_album_names(f) == ["Ceremony"]
+
+
+def test_get_album_names_browser_upload_two_levels(tmp_path, make_importer):
+    imp = make_importer(skip_root_folder=True)
+    f = tmp_path / "Wedding Photos" / "Ceremony" / "Church" / "photo.jpg"
+    assert imp._get_album_names(f) == ["Ceremony", "Church"]
+
+
+def test_get_album_names_browser_upload_file_in_root_no_root_album(tmp_path, make_importer):
+    # After skipping "Wedding Photos", only the filename remains — no album
+    imp = make_importer(skip_root_folder=True, root_album=False)
+    f = tmp_path / "Wedding Photos" / "photo.jpg"
+    assert imp._get_album_names(f) == []
+
+
+def test_get_album_names_browser_upload_file_in_root_with_root_album(tmp_path, make_importer):
+    # root_folder_name = "Wedding Photos" (the skipped first component)
+    imp = make_importer(skip_root_folder=True, root_album=True)
+    f = tmp_path / "Wedding Photos" / "photo.jpg"
+    assert imp._get_album_names(f) == ["Wedding Photos"]
+
+
+# ---------------------------------------------------------------------------
+# _upload_file return type tests
+# ---------------------------------------------------------------------------
+
+def test_upload_file_returns_asset_id_on_success(tmp_path):
+    FolderImporter = load_folder_importer()
+    imp = FolderImporter(tmp_path, "http://immich", "key")
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"fake")
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 201
+    mock_resp.json.return_value = {"id": "abc-123"}
+
+    with patch.object(imp.session, "post", return_value=mock_resp):
+        result = imp._upload_file(photo)
+
+    assert result == "abc-123"
+
+
+def test_upload_file_returns_asset_id_on_duplicate(tmp_path):
+    FolderImporter = load_folder_importer()
+    imp = FolderImporter(tmp_path, "http://immich", "key")
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"fake")
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 409
+    mock_resp.json.return_value = {"id": "existing-456"}
+
+    with patch.object(imp.session, "post", return_value=mock_resp):
+        result = imp._upload_file(photo)
+
+    assert result == "existing-456"
+    assert imp.stats["duplicates"] == 1
+
+
+def test_upload_file_returns_none_on_server_error(tmp_path):
+    FolderImporter = load_folder_importer()
+    imp = FolderImporter(tmp_path, "http://immich", "key")
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"fake")
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_resp.json.return_value = {}
+
+    with patch.object(imp.session, "post", return_value=mock_resp):
+        result = imp._upload_file(photo)
+
+    assert result is None
+    assert imp.stats["errors"] == 1
+
+
+def test_upload_file_returns_none_for_progress_file_skip(tmp_path):
+    FolderImporter = load_folder_importer()
+    imp = FolderImporter(tmp_path, "http://immich", "key")
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"fake")
+    # Mark as already uploaded in the progress file
+    imp.uploaded_files.add("photo.jpg")
+
+    with patch.object(imp.session, "post") as mock_post:
+        result = imp._upload_file(photo)
+
+    mock_post.assert_not_called()
+    assert result is None  # progress-file skips don't replay album assignments
+    assert imp.stats["duplicates"] == 1

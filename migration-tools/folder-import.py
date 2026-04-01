@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, Dict, List
 import requests
 
 logger = logging.getLogger(__name__)
@@ -37,18 +38,54 @@ MIME_TYPES = {
 }
 
 
+def _get_exif_date(file_path: Path) -> Optional[datetime]:
+    """Read DateTimeOriginal (or DateTime) from EXIF. Returns None if not found."""
+    try:
+        from PIL import Image
+        with Image.open(file_path) as img:
+            exif = img.getexif()
+            for tag_id in (36867, 36868, 306):  # DateTimeOriginal, DateTimeDigitized, DateTime
+                val = exif.get(tag_id)
+                if val:
+                    return datetime.strptime(val, '%Y:%m:%d %H:%M:%S')
+    except Exception:
+        pass
+    return None
+
+
 class FolderImporter:
     """Import photos from a plain folder (no export format required)."""
 
-    def __init__(self, directory: Path, immich_url: str, api_key: str):
+    def __init__(
+        self,
+        directory: Path,
+        immich_url: str,
+        api_key: str,
+        create_albums: bool = False,
+        root_album: bool = False,
+        skip_root_folder: bool = False,
+    ):
         self.directory = Path(directory)
         self.immich_url = immich_url.rstrip('/')
         self.api_key = api_key
+        self.create_albums = create_albums
+        self.root_album = root_album
+        self.skip_root_folder = skip_root_folder
         self.session = requests.Session()
         self.session.headers.update({'Authorization': f'Bearer {api_key}', 'Accept': 'application/json'})
-        self.stats = {'total_files': 0, 'uploaded': 0, 'duplicates': 0, 'errors': 0}
+        self.stats = {
+            'total_files': 0, 'uploaded': 0, 'duplicates': 0, 'errors': 0,
+            'albums_created': 0, 'current_file': '',
+        }
         self.progress_file = self.directory / 'folder-import-progress.json'
         self.uploaded_files = self._load_progress()
+        # Album tracking state
+        self._album_buffer: Dict[str, List[str]] = {}
+        self._existing_albums: Dict[str, str] = {}
+        self._albums_cache_loaded: bool = False
+        self._files_since_flush: int = 0
+        self._current_batch: int = 0
+        self._total_batches: int = 0
 
     def _load_progress(self) -> set:
         if self.progress_file.exists():
@@ -66,6 +103,24 @@ class FolderImporter:
         except Exception:
             pass
 
+    def _get_album_names(self, file_path: Path) -> List[str]:
+        """Return the list of album names a file belongs to based on its subfolder path."""
+        rel = file_path.relative_to(self.directory)
+        parts = rel.parts
+        if self.skip_root_folder:
+            root_folder_name = parts[0] if parts else ''
+            path_parts = parts[1:]
+        else:
+            root_folder_name = self.directory.name
+            path_parts = parts
+        # Only the filename remains — file is directly in the (possibly-skipped) root
+        if len(path_parts) <= 1:
+            if self.root_album and root_folder_name:
+                return [root_folder_name]
+            return []
+        # Return all directory components, excluding the filename
+        return list(path_parts[:-1])
+
     def _scan_files(self) -> list:
         """Scan directory recursively for supported image/video files."""
         return [
@@ -73,16 +128,17 @@ class FolderImporter:
             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
         ]
 
-    def _upload_file(self, file_path: Path) -> bool:
-        """Upload a single file to Immich. Returns True on success."""
+    def _upload_file(self, file_path: Path) -> Optional[str]:
+        """Upload a single file to Immich. Returns asset_id on success/duplicate, None on error or skip."""
         file_key = str(file_path.relative_to(self.directory))
 
         if file_key in self.uploaded_files:
             self.stats['duplicates'] += 1
-            return True
+            return None  # Already uploaded — progress-file skip; album assignment not replayed
 
         mime_type = MIME_TYPES.get(file_path.suffix.lower(), 'application/octet-stream')
-        file_created_at = datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
+        exif_date = _get_exif_date(file_path)
+        file_created_at = (exif_date or datetime.fromtimestamp(file_path.stat().st_mtime)).isoformat()
 
         try:
             with open(file_path, 'rb') as f:
@@ -103,18 +159,21 @@ class FolderImporter:
                 self.stats['uploaded'] += 1
                 self.uploaded_files.add(file_key)
                 self._save_progress()
-                return True
+                return response.json().get('id')
             elif response.status_code == 409:
+                asset_id = response.json().get('id')
                 self.stats['duplicates'] += 1
                 self.uploaded_files.add(file_key)
                 self._save_progress()
-                return True
+                if not asset_id:
+                    logger.warning(f"Duplicate {file_path.name} — no id in 409 response, skipping album")
+                return asset_id
             else:
                 logger.error(f"Upload failed ({response.status_code}): {file_path.name}")
                 self.stats['errors'] += 1
-                return False
+                return None
 
         except Exception as e:
             logger.error(f"Error uploading {file_path}: {e}")
             self.stats['errors'] += 1
-            return False
+            return None
