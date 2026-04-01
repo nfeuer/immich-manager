@@ -218,3 +218,84 @@ def test_upload_file_returns_none_for_progress_file_skip(tmp_path):
     mock_post.assert_not_called()
     assert result is None  # progress-file skips don't replay album assignments
     assert imp.stats["duplicates"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _flush_albums tests
+# ---------------------------------------------------------------------------
+
+def test_flush_albums_skips_on_empty_buffer(tmp_path, make_importer):
+    imp = make_importer(create_albums=True)
+    imp._albums_cache_loaded = True
+    imp._album_buffer = {}
+
+    with patch.object(imp.session, "post") as mock_post:
+        imp._flush_albums()
+
+    mock_post.assert_not_called()
+    assert imp._current_batch == 0  # no increment when buffer is empty
+
+
+def test_flush_albums_creates_new_album(tmp_path, make_importer):
+    imp = make_importer(create_albums=True)
+    imp._albums_cache_loaded = True
+    imp._album_buffer = {"Ceremony": ["id1", "id2"]}
+    imp._total_batches = 1
+
+    post_resp = MagicMock()
+    post_resp.status_code = 201
+    post_resp.json.return_value = {"id": "album-abc", "albumName": "Ceremony"}
+    post_resp.raise_for_status = MagicMock()
+
+    with patch.object(imp.session, "post", return_value=post_resp):
+        imp._flush_albums()
+
+    assert imp.stats["albums_created"] == 1
+    assert imp._existing_albums["Ceremony"] == "album-abc"
+    assert imp._album_buffer == {}
+    assert imp._current_batch == 1
+
+
+def test_flush_albums_adds_to_existing_album(tmp_path, make_importer):
+    imp = make_importer(create_albums=True)
+    imp._albums_cache_loaded = True
+    imp._existing_albums = {"Ceremony": "album-existing"}
+    imp._album_buffer = {"Ceremony": ["id3"]}
+    imp._total_batches = 1
+
+    put_resp = MagicMock()
+    put_resp.status_code = 200
+    put_resp.raise_for_status = MagicMock()
+
+    with patch.object(imp.session, "put", return_value=put_resp) as mock_put:
+        imp._flush_albums()
+
+    mock_put.assert_called_once()
+    call_url = mock_put.call_args[0][0]
+    assert "album-existing" in call_url
+    assert imp.stats["albums_created"] == 0  # not incremented for existing album
+    assert imp._current_batch == 1
+
+
+def test_flush_albums_loads_cache_lazily_on_first_call(tmp_path, make_importer):
+    imp = make_importer(create_albums=True)
+    # _albums_cache_loaded is False — should trigger GET /api/albums
+    imp._album_buffer = {"Venue": ["id1"]}
+    imp._total_batches = 1
+
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json.return_value = [{"albumName": "Venue", "id": "v-id"}]
+    get_resp.raise_for_status = MagicMock()
+
+    put_resp = MagicMock()
+    put_resp.status_code = 200
+    put_resp.raise_for_status = MagicMock()
+
+    with patch.object(imp.session, "get", return_value=get_resp):
+        with patch.object(imp.session, "put", return_value=put_resp):
+            imp._flush_albums()
+
+    assert imp._albums_cache_loaded is True
+    assert imp._existing_albums["Venue"] == "v-id"
+    assert imp._current_batch == 1

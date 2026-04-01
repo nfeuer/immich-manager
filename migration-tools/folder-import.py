@@ -121,6 +121,59 @@ class FolderImporter:
         # Return all directory components, excluding the filename
         return list(path_parts[:-1])
 
+    def _load_album_cache(self):
+        """Fetch existing albums once and cache name→id. Called lazily on first flush."""
+        if self._albums_cache_loaded:
+            return
+        try:
+            resp = self.session.get(f'{self.immich_url}/api/albums')
+            resp.raise_for_status()
+            self._existing_albums = {a['albumName']: a['id'] for a in resp.json()}
+        except Exception as e:
+            logger.warning(f"Could not load album cache: {e}")
+        self._albums_cache_loaded = True
+
+    def _flush_albums(self):
+        """Send buffered album assignments to Immich. Non-fatal on API errors."""
+        if not self._album_buffer:
+            return
+        self._load_album_cache()
+
+        # Capture counts before clearing — used in the log line
+        flushed_counts = {name: len(ids) for name, ids in self._album_buffer.items()}
+
+        for album_name, asset_ids in list(self._album_buffer.items()):
+            try:
+                if album_name in self._existing_albums:
+                    album_id = self._existing_albums[album_name]
+                    resp = self.session.put(
+                        f'{self.immich_url}/api/albums/{album_id}/assets',
+                        json={'ids': asset_ids},
+                    )
+                    resp.raise_for_status()
+                else:
+                    resp = self.session.post(
+                        f'{self.immich_url}/api/albums',
+                        json={'albumName': album_name, 'assetIds': asset_ids},
+                    )
+                    resp.raise_for_status()
+                    new_id = resp.json().get('id')
+                    if new_id:
+                        self._existing_albums[album_name] = new_id
+                    self.stats['albums_created'] += 1
+            except Exception as e:
+                logger.warning(f"Album '{album_name}' update failed: {e}")
+
+        self._album_buffer.clear()
+        self._current_batch += 1
+
+        album_summary = ', '.join(f"{n}({c})" for n, c in flushed_counts.items())
+        logger.info(
+            f"[Import:folder] Batch {self._current_batch}/{self._total_batches} — "
+            f"{self.stats['uploaded']} uploaded, {self.stats['duplicates']} duplicates, "
+            f"{self.stats['errors']} errors | {album_summary}"
+        )
+
     def _scan_files(self) -> list:
         """Scan directory recursively for supported image/video files."""
         return [
