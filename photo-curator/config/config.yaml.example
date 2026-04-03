@@ -74,3 +74,7 @@ batch_processing:
 
   # Default processing mode for scheduled runs
   default_mode: "incremental"    # incremental | missing_vectors | full | retry_errors
+
+# Server Manager URL — Photo Curator delegates IP gate checks here.
+# Must match the URL where Server Manager is running.
+server_manager_url: "http://localhost:8080"

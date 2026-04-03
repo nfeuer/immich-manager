@@ -41,6 +41,7 @@ from .logging_config import setup_json_logging
 from .batch_processor import BatchProcessor
 from .gpu_utils import GPUManager
 from .dedup_scanner import DedupScanner
+from .ip_gate_client import IPGateClient
 from shared.auth import (
     Role, ensure_users_table, require_role,
     get_all_users, update_user_role,
@@ -129,6 +130,48 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+_IP_GATE_EXEMPT_PREFIXES = (
+    "/health",
+    "/api/ip-gate/",
+    "/ip-challenge",
+    "/assets/",
+    "/static/",
+)
+
+
+@app.middleware("http")
+async def ip_gate_check(request: Request, call_next):
+    """Check client IP against Server Manager's IP gate before processing requests."""
+    path = request.url.path
+    if any(path.startswith(prefix) for prefix in _IP_GATE_EXEMPT_PREFIXES):
+        return await call_next(request)
+
+    ip_gate_client: IPGateClient = request.app.state.ip_gate_client
+    client_ip = request.client.host if request.client else "unknown"
+    result = ip_gate_client.check_ip(client_ip)
+    status = result.get("status", "unknown")
+
+    if status == "trusted":
+        return await call_next(request)
+
+    if status == "revoked":
+        accept = request.headers.get("accept", "")
+        if "application/json" in accept:
+            return JSONResponse({"detail": "Access revoked."}, status_code=403)
+        return JSONResponse({"detail": "Access revoked."}, status_code=403)
+
+    # pending or unknown — redirect to Server Manager challenge page
+    server_manager_url = request.app.state.server_manager_url
+    challenge_url = f"{server_manager_url}/ip-challenge?ip={client_ip}"
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept:
+        return JSONResponse(
+            {"detail": "IP not yet trusted.", "challenge_url": challenge_url},
+            status_code=403,
+        )
+    return RedirectResponse(url=challenge_url, status_code=302)
+
+
 # Global state
 config: Optional[Dict] = None
 database: Optional[Database] = None
@@ -205,6 +248,12 @@ async def startup_event():
                 "ai": {"use_local_models": True},
                 "notifications": {"email": {"enabled": False}}
             }
+
+        # Initialize IP gate client (delegates checks to Server Manager)
+        server_manager_url = config.get("server_manager_url", "http://localhost:8080")
+        app.state.ip_gate_client = IPGateClient(server_manager_url)
+        app.state.server_manager_url = server_manager_url
+        logger.info(f"IP gate client configured (Server Manager: {server_manager_url})")
 
         # Initialize database
         database = Database()
