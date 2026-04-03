@@ -106,6 +106,23 @@ thresholds:
 auth:
   default_role: "user"  # Role assigned to new users: "admin", "user", or "guest"
 
+# IP Gate — centralized IP verification and monitoring
+ip_gate:
+  enabled: true
+  trusted_proxy_ips:
+    - "127.0.0.1"
+    - "172.17.0.1"  # Docker bridge
+  token_expiry_minutes: 15
+  email_rate_limit: "3/15minutes"
+  verification_rate_limit: "5/15minutes"
+  admin_email: "admin@yourdomain.com"  # fallback alert recipient
+  cloudflare:
+    enabled: false  # requires Teams Standard plan
+    api_token: "${CLOUDFLARE_API_TOKEN:-}"
+    account_id: ""
+    list_name: "immich-trusted-ips"
+    reconciliation_interval_hours: 6
+
 alerts:
   email:
     enabled: true
