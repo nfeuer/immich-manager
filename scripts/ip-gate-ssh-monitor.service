@@ -1,0 +1,22 @@
+[Unit]
+Description=IP Gate SSH Login Monitor
+After=network.target immich-server-manager.service
+Wants=immich-server-manager.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/immich-server-manager
+ExecStart=/opt/immich-server-manager/venv/bin/python -m src.ip_gate_ssh_monitor
+Restart=on-failure
+RestartSec=10
+User=root
+Group=root
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/immich-server-manager/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
