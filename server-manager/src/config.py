@@ -119,6 +119,26 @@ class AutoUpdateConfig(BaseModel):
     health_check_timeout: int = 120     # Seconds to wait for healthy post-update
 
 
+class CloudflareConfig(BaseModel):
+    """Cloudflare Zero Trust integration for IP gate"""
+    enabled: bool = False
+    api_token: str = ""
+    account_id: str = ""
+    list_name: str = "immich-trusted-ips"
+    reconciliation_interval_hours: int = 6
+
+
+class IPGateConfig(BaseModel):
+    """IP gate security monitoring configuration"""
+    enabled: bool = True
+    trusted_proxy_ips: List[str] = Field(default_factory=lambda: ["127.0.0.1", "172.17.0.1"])
+    token_expiry_minutes: int = 15
+    email_rate_limit: str = "3/15minutes"
+    verification_rate_limit: str = "5/15minutes"
+    admin_email: str = ""
+    cloudflare: CloudflareConfig = Field(default_factory=CloudflareConfig)
+
+
 class Config(BaseModel):
     """Main configuration"""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -130,6 +150,7 @@ class Config(BaseModel):
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     auto_update: AutoUpdateConfig = Field(default_factory=AutoUpdateConfig)
+    ip_gate: IPGateConfig = Field(default_factory=IPGateConfig)
 
 
 _ENV_VAR_PATTERN = re.compile(r'\$\{([^}]+)\}')
