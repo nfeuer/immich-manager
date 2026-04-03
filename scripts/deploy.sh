@@ -304,6 +304,23 @@ for svc in "${SERVICES[@]}"; do
     echo ""
 done
 
+# ── Step 4b: Install/update IP gate SSH monitor service ─────────────
+SSH_MONITOR_SERVICE="ip-gate-ssh-monitor.service"
+SSH_MONITOR_SRC="${SM_INSTALL}/scripts/ip-gate-ssh-monitor.service"
+if [ -f "$SSH_MONITOR_SRC" ]; then
+    if ! systemctl is-enabled "$SSH_MONITOR_SERVICE" &>/dev/null; then
+        log "  Installing IP gate SSH monitor service..."
+        cp "$SSH_MONITOR_SRC" /etc/systemd/system/
+        systemctl daemon-reload
+        systemctl enable "$SSH_MONITOR_SERVICE"
+        systemctl start "$SSH_MONITOR_SERVICE"
+        log "  SSH monitor service installed and started"
+    else
+        systemctl restart "$SSH_MONITOR_SERVICE" || warn "  SSH monitor restart failed"
+        log "  SSH monitor service restarted"
+    fi
+fi
+
 # ── Step 5: Verify migrations ────────────────────────────────────────
 sep
 log "Step 5/5: Checking for applied migrations..."
