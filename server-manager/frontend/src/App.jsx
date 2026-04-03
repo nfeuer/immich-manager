@@ -1,4 +1,5 @@
 import React from 'react'
+import ChallengePage from './pages/ChallengePage.jsx'
 import Header from './components/Header.jsx'
 import SystemStatusCard from './components/SystemStatusCard.jsx'
 import ImmichStatusCard from './components/ImmichStatusCard.jsx'
@@ -37,6 +38,10 @@ class ErrorBoundary extends React.Component {
 }
 
 export default function App() {
+  if (window.location.pathname === '/ip-challenge') {
+    return <ChallengePage />
+  }
+
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-immich-bg text-immich-text">
