@@ -420,12 +420,12 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # Prepare metadata
+            # Prepare metadata — exclude per-column fields and non-serialisable objects
             metadata = {
                 k: v for k, v in scores.items()
                 if k not in ['score', 'technical_quality', 'blur_score', 'exposure_score',
                              'composition_score', 'face_score', 'face_count', 'perceptual_hash',
-                             'width', 'height', 'megapixels']
+                             'width', 'height', 'megapixels', 'face_embeddings', 'scene', 'success']
             }
 
             cursor.execute("""

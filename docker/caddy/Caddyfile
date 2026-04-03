@@ -80,5 +80,5 @@ http://manager.houseoffeuer.com {
 http://curator.houseoffeuer.com {
     import security_headers
     import immich_auth
-    reverse_proxy photo-curator:8081
+    reverse_proxy host.docker.internal:8081
 }

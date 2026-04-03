@@ -146,21 +146,30 @@ class FolderImporter:
             try:
                 if album_name in self._existing_albums:
                     album_id = self._existing_albums[album_name]
-                    resp = self.session.put(
-                        f'{self.immich_url}/api/albums/{album_id}/assets',
-                        json={'ids': asset_ids},
-                    )
-                    resp.raise_for_status()
                 else:
                     resp = self.session.post(
                         f'{self.immich_url}/api/albums',
-                        json={'albumName': album_name, 'assetIds': asset_ids},
+                        json={'albumName': album_name},
                     )
                     resp.raise_for_status()
-                    new_id = resp.json().get('id')
-                    if new_id:
-                        self._existing_albums[album_name] = new_id
+                    album_id = resp.json().get('id')
+                    if not album_id:
+                        logger.warning(f"Album '{album_name}' created but no id in response: {resp.text[:200]}")
+                        continue
+                    self._existing_albums[album_name] = album_id
                     self.stats['albums_created'] += 1
+
+                put_resp = self.session.put(
+                    f'{self.immich_url}/api/albums/{album_id}/assets',
+                    json={'ids': asset_ids},
+                )
+                put_resp.raise_for_status()
+                results = put_resp.json() if isinstance(put_resp.json(), list) else []
+                failed = [r for r in results if not r.get('success')]
+                if failed:
+                    logger.warning(f"Album '{album_name}': {len(failed)}/{len(asset_ids)} assets failed to add: {failed[:3]}")
+                else:
+                    logger.debug(f"Album '{album_name}': added {len(asset_ids)} assets")
             except Exception as e:
                 logger.warning(f"Album '{album_name}' update failed: {e}")
 

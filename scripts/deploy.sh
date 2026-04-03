@@ -149,8 +149,17 @@ if [ "$ROLLBACK" = true ]; then
             sha="$(cat "${latest_backup}/git-sha")"
             cd "$REPO_DIR"
             git checkout "$sha" -- "${svc}/"
+            find "${install_dir}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
             cp -r "${REPO_DIR}/${svc}/"* "$install_dir/"
             log "Code rolled back to ${sha:0:8}"
+
+            # Also roll back migration-tools for photo-curator
+            if [ "$svc" = "photo-curator" ]; then
+                git checkout "$sha" -- migration-tools/
+                rm -rf /opt/migration-tools/__pycache__ 2>/dev/null || true
+                cp -r "${REPO_DIR}/migration-tools/." /opt/migration-tools/
+                log "migration-tools rolled back to ${sha:0:8}"
+            fi
         fi
 
         # Reinstall deps and restart
@@ -212,15 +221,22 @@ log "Step 2/5: Pulling latest code..."
 cd "$REPO_DIR"
 
 # Stash any local changes (e.g. config edits in the repo dir)
-if ! git diff --quiet 2>/dev/null; then
+STASHED=false
+if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
     warn "Stashing local changes..."
     git stash
+    STASHED=true
 fi
 
 target_branch="${BRANCH:-$(git symbolic-ref --short HEAD)}"
 git fetch origin "$target_branch"
 git checkout "$target_branch"
 git pull origin "$target_branch"
+
+# Restore any stashed changes after the pull
+if [ "$STASHED" = true ]; then
+    git stash pop || warn "Could not restore stashed changes — run 'git stash pop' manually"
+fi
 
 new_sha="$(git rev-parse --short HEAD)"
 log "Now at commit ${new_sha}"
@@ -235,9 +251,19 @@ for svc in "${SERVICES[@]}"; do
         photo-curator)  install_dir="$PC_INSTALL" ;;
     esac
 
+    # Clear stale bytecode before syncing so removed/renamed modules can't be imported
+    find "${install_dir}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
     # Copy new source files
     cp -r "${REPO_DIR}/${svc}/"* "${install_dir}/"
     log "  ${svc}: files synced"
+
+    # Sync migration tools alongside photo-curator (they share the same import path)
+    if [ "$svc" = "photo-curator" ]; then
+        rm -rf /opt/migration-tools/__pycache__ 2>/dev/null || true
+        cp -r "${REPO_DIR}/migration-tools/." /opt/migration-tools/
+        log "  migration-tools: files synced"
+    fi
 
     # Install/update deps
     if [ -f "${install_dir}/venv/bin/pip" ]; then

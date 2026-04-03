@@ -247,13 +247,24 @@ def test_flush_albums_creates_new_album(tmp_path, make_importer):
     post_resp.json.return_value = {"id": "album-abc", "albumName": "Ceremony"}
     post_resp.raise_for_status = MagicMock()
 
+    put_resp = MagicMock()
+    put_resp.status_code = 200
+    put_resp.json.return_value = [{"success": True}, {"success": True}]
+    put_resp.raise_for_status = MagicMock()
+
     with patch.object(imp.session, "post", return_value=post_resp):
-        imp._flush_albums()
+        with patch.object(imp.session, "put", return_value=put_resp) as mock_put:
+            imp._flush_albums()
 
     assert imp.stats["albums_created"] == 1
     assert imp._existing_albums["Ceremony"] == "album-abc"
     assert imp._album_buffer == {}
     assert imp._current_batch == 1
+    # PUT must be called to add assets after album creation
+    mock_put.assert_called_once()
+    call_url = mock_put.call_args[0][0]
+    assert "album-abc" in call_url
+    assert mock_put.call_args[1]["json"] == {"ids": ["id1", "id2"]}
 
 
 def test_flush_albums_adds_to_existing_album(tmp_path, make_importer):
@@ -265,6 +276,7 @@ def test_flush_albums_adds_to_existing_album(tmp_path, make_importer):
 
     put_resp = MagicMock()
     put_resp.status_code = 200
+    put_resp.json.return_value = [{"success": True}]
     put_resp.raise_for_status = MagicMock()
 
     with patch.object(imp.session, "put", return_value=put_resp) as mock_put:
@@ -290,6 +302,7 @@ def test_flush_albums_loads_cache_lazily_on_first_call(tmp_path, make_importer):
 
     put_resp = MagicMock()
     put_resp.status_code = 200
+    put_resp.json.return_value = [{"success": True}]
     put_resp.raise_for_status = MagicMock()
 
     with patch.object(imp.session, "get", return_value=get_resp):

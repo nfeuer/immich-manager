@@ -40,6 +40,11 @@ sudo mkdir -p /opt/photo-curator/shared
 sudo cp -r "$SCRIPT_DIR/../shared/." /opt/photo-curator/shared/
 sudo chown -R immich-mgr:immich-mgr /opt/photo-curator
 
+# Copy migration tools (used by photo-curator import jobs)
+sudo mkdir -p /opt/migration-tools
+sudo cp -r "$SCRIPT_DIR/../migration-tools/." /opt/migration-tools/
+sudo chown -R immich-mgr:immich-mgr /opt/migration-tools
+
 mark_step_complete "phase2_photo_curator" "create_directory"
 echo -e "${GREEN}✓${NC} Directory created"
 
@@ -64,14 +69,14 @@ echo ""
 echo "Installing Python dependencies (this may take a while)..."
 mark_step_start "phase2_photo_curator" "install_dependencies"
 
-pip install --upgrade pip > /dev/null
-pip install -r requirements.txt
-
-# Install system dependencies required before pip ML packages
-# cmake + build-essential: needed to compile dlib from source
-# libgl1-mesa-glx + libglib2.0-0: needed by OpenCV
+# Install system dependencies first — cmake + build-essential are required to
+# compile dlib from source; libgl1 + libglib2.0-0 are needed by OpenCV.
+# These must be present before any pip install that builds C extensions.
 sudo apt-get update > /dev/null
 sudo apt-get install -y cmake build-essential libgl1 libglib2.0-0 > /dev/null
+
+pip install --upgrade pip > /dev/null
+pip install -r requirements.txt
 
 # Install ML/AI dependencies (face recognition, scene detection)
 # dlib requires cmake + build-essential; torch is ~2 GB — expect several minutes
