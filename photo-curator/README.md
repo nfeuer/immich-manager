@@ -847,13 +847,27 @@ ai:
 - Only works with JPEG/PNG/HEIC formats
 - Large libraries (50,000+ photos) may take hours to analyze
 
+## Known Issues
+
+- **Duplicate comparison view**: When selecting between two photos, the detail panel opens as a narrow side drawer. Photos are rendered too small and the `aspect-square` crop cuts off parts of the image. Should be replaced with a full-screen modal that shows photos at full height without cropping.
+
 ## Future Enhancements
 
-- [ ] Deep learning models for better face detection
+### Notifications
+- [ ] Photo Quality Alerts — email tips when quality trends downward
+- [ ] Memory Lane — "On This Day" email digest from past years
+- [ ] Seasonal Automations — year-end reviews, birthday albums, holiday collections
+
+### UI & Suggestions
+- [ ] Sharing Suggestions — prompt to share photos with family members
+- [ ] Advanced AI configuration — expose scoring weights, hash size, and model settings in the Preferences UI
+
+### AI & Analysis
+- [ ] Deep learning models for better face detection (replace Haar cascades)
 - [ ] Scene detection (beach, mountains, indoor, etc.)
 - [ ] Object detection (pets, cars, food)
-- [ ] Smart event clustering (birthdays, vacations)
-- [ ] Year-end review automation
+
+### Platform
 - [ ] Mobile app for curation on-the-go
 
 ## License
