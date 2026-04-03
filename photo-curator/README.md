@@ -862,10 +862,11 @@ ai:
 - [ ] Sharing Suggestions — prompt to share photos with family members
 - [ ] Advanced AI configuration — expose scoring weights, hash size, and model settings in the Preferences UI
 
-### AI & Analysis
-- [ ] Deep learning models for better face detection (replace Haar cascades)
-- [ ] Scene detection (beach, mountains, indoor, etc.)
-- [ ] Object detection (pets, cars, food)
+### AI & Analysis (leverage Immich metadata)
+- [ ] Use Immich `smartInfo` for scene/object tags instead of building standalone detection — photos with detected people, pets, or landmarks score higher in curation
+- [ ] Use Immich `people` data (named face recognition) to boost photos of known family/friends — replaces Haar cascade face detection with Immich's ML results
+- [ ] Use EXIF camera settings (`iso`, `exposureTime`, `fNumber`, `focalLength`) for technical quality scoring without downloading thumbnails
+- [ ] Use `favorite` and `archived` flags as curation signals — boost starred photos, skip archived ones
 
 ### Platform
 - [ ] Mobile app for curation on-the-go
