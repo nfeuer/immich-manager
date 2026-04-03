@@ -9,6 +9,7 @@ import BackupsCard from './components/BackupsCard.jsx'
 import LogViewer from './components/LogViewer.jsx'
 import ServiceControls from './components/ServiceControls.jsx'
 import UpdateManagement from './components/UpdateManagement.jsx'
+import IPManagement from './components/IPManagement.jsx'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -57,6 +58,7 @@ export default function App() {
           <LogViewer />
           <ServiceControls />
           <UpdateManagement />
+          <IPManagement />
         </div>
       </div>
     </ErrorBoundary>
