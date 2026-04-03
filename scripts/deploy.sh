@@ -149,8 +149,10 @@ if [ "$ROLLBACK" = true ]; then
             sha="$(cat "${latest_backup}/git-sha")"
             cd "$REPO_DIR"
             git checkout "$sha" -- "${svc}/"
+            git checkout "$sha" -- shared/
             find "${install_dir}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
             cp -r "${REPO_DIR}/${svc}/"* "$install_dir/"
+            cp -r "${REPO_DIR}/shared/." "${install_dir}/shared/"
             log "Code rolled back to ${sha:0:8}"
 
             # Also roll back migration-tools for photo-curator
@@ -257,6 +259,14 @@ for svc in "${SERVICES[@]}"; do
     # Copy new source files
     cp -r "${REPO_DIR}/${svc}/"* "${install_dir}/"
     log "  ${svc}: files synced"
+
+    # Sync shared/ module (used by both services)
+    if [ -d "${REPO_DIR}/shared" ]; then
+        rm -rf "${install_dir}/shared/__pycache__" 2>/dev/null || true
+        find "${install_dir}/shared" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        cp -r "${REPO_DIR}/shared/." "${install_dir}/shared/"
+        log "  shared: files synced to ${install_dir}/shared/"
+    fi
 
     # Sync migration tools alongside photo-curator (they share the same import path)
     if [ "$svc" = "photo-curator" ]; then
