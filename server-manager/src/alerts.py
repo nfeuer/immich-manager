@@ -97,6 +97,49 @@ class AlertManager:
             logger.error(f"Failed to send email: {e}")
             return False
 
+    async def send_email_to(self, recipient: str, subject: str, body: str,
+                            severity: str = "info") -> bool:
+        """Send email to a specific recipient (not the configured list)."""
+        if not self.config.email.enabled:
+            return False
+
+        try:
+            message = MIMEMultipart()
+            message["From"] = self.config.email.from_addr
+            message["To"] = recipient
+            message["Subject"] = f"[Immich {severity.upper()}] {subject}"
+
+            html_body = f"""
+            <html>
+                <body>
+                    <h2>{_SEVERITY_EMOJI.get(severity, '')} {subject}</h2>
+                    <p><strong>Severity:</strong> {severity.upper()}</p>
+                    <p><strong>Time:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+                    <hr>
+                    <pre>{body}</pre>
+                    <p style="color:#888;font-size:12px">
+                        Immich Manager
+                    </p>
+                </body>
+            </html>
+            """
+
+            message.attach(MIMEText(html_body, "html"))
+
+            await aiosmtplib.send(
+                message,
+                hostname=self.config.email.smtp_host,
+                port=self.config.email.smtp_port,
+                username=self.config.email.smtp_user,
+                password=self.config.email.smtp_password,
+                start_tls=True,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send email to {recipient}: {e}")
+            return False
+
     # ------------------------------------------------------------------
     # Generic webhook (Slack / custom)
     # ------------------------------------------------------------------

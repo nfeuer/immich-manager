@@ -21,6 +21,7 @@ Admin management endpoints (auth + admin required):
 import hmac
 import logging
 import os
+from datetime import datetime
 from typing import Optional
 
 import requests as http_requests
@@ -157,18 +158,66 @@ def validate_immich_email(api_url: str, email: str) -> Optional[dict]:
     return None
 
 
-def _send_verification_email(email: str, token: str, request: Request) -> None:
-    """Send a verification email (placeholder — logs the link for now)."""
-    base_url = str(request.base_url).rstrip("/")
-    verify_url = f"{base_url}/api/ip-gate/verify/{token}"
-    logger.info("Verification link for %s: %s", email, verify_url)
-    # TODO: integrate real email sending (SMTP / Cloudflare Email Workers)
+async def _send_verification_email(email: str, token: str, request: Request) -> None:
+    """Send verification email to the specific user requesting verification."""
+    public_url = getattr(request.app.state, "public_url", "") or str(request.base_url).rstrip("/")
+    verify_base = f"{public_url}/api/ip-gate/verify/{token}"
+    client_ip = _get_client_ip(request)
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    body = (
+        f"Someone is trying to access Immich from {client_ip} at {now}.\n\n"
+        "If this is you, choose how long to trust this IP:\n\n"
+        f"  Trust for 24 hours: {verify_base}?duration=24h\n"
+        f"  Trust for 7 days:   {verify_base}?duration=7d\n"
+        f"  Trust for 30 days:  {verify_base}?duration=30d\n"
+        f"  Trust permanently:  {verify_base}?duration=permanent\n\n"
+        "If this wasn't you, ignore this email. The IP will remain blocked."
+    )
+
+    alert_manager = getattr(request.app.state, "alert_manager", None)
+    if alert_manager:
+        await alert_manager.send_email_to(
+            email,
+            "New login attempt from unrecognized IP",
+            body,
+            "warning",
+        )
+    else:
+        logger.warning("No alert manager — verification link for %s: %s", email, verify_base)
 
 
-def _send_cloudflare_notification(ip_address: str, action: str) -> None:
-    """Notify Cloudflare of IP status changes (placeholder)."""
-    logger.info("Cloudflare notification: IP %s action=%s", ip_address, action)
-    # TODO: integrate Cloudflare API for IP list sync
+async def _send_cloudflare_notification(ip_address: str, email: str, request: Request) -> None:
+    """Send notification about admin IP verification for Cloudflare update."""
+    alert_manager = getattr(request.app.state, "alert_manager", None)
+    if not alert_manager:
+        return
+
+    ip_gate_config = getattr(request.app.state, "ip_gate_config", None)
+    cf_enabled = ip_gate_config and ip_gate_config.cloudflare.enabled
+
+    if cf_enabled:
+        alert_manager.send_discord(
+            "Admin IP Verified — Cloudflare Syncing",
+            f"IP `{ip_address}` verified by `{email}`.\n"
+            "Cloudflare Access list will be updated automatically.",
+            "info",
+        )
+    else:
+        alert_manager.send_discord(
+            "Admin IP Verified — Update Cloudflare Manually",
+            f"IP `{ip_address}` was verified by `{email}`.\n"
+            "Add it to your Cloudflare Access policy:\n"
+            "Zero Trust -> Access -> [your app] -> Add IP rule.",
+            "warning",
+        )
+        await alert_manager.send_email(
+            "New admin IP verified — update Cloudflare",
+            f"IP {ip_address} was verified by {email}.\n\n"
+            "Add it to your Cloudflare Access policy:\n"
+            "Zero Trust -> Access -> [your app] -> Add IP rule.",
+            "warning",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +260,15 @@ async def challenge_submit(body: ChallengeRequest, request: Request):
     # Ensure IP is in the pending table
     insert_pending_ip(db, client_ip, source="challenge")
 
+    # Discord alert for new challenge attempt (always, regardless of email validity)
+    alert_manager = getattr(request.app.state, "alert_manager", None)
+    if alert_manager:
+        alert_manager.send_discord(
+            "IP Verification Challenge",
+            f"New IP `{client_ip}` submitted a verification challenge.",
+            "info",
+        )
+
     # Check Immich for user (result intentionally unused in response)
     api_url = getattr(request.app.state, "immich_api_url", "")
     immich_user = validate_immich_email(api_url, body.email)
@@ -219,7 +277,7 @@ async def challenge_submit(body: ChallengeRequest, request: Request):
         config = getattr(request.app.state, "ip_gate_config", None)
         expiry = config.token_expiry_minutes if config else 15
         token = create_verification_token(db, client_ip, body.email, expiry)
-        _send_verification_email(body.email, token, request)
+        await _send_verification_email(body.email, token, request)
 
     # Identical response whether email exists or not
     return {
@@ -228,8 +286,12 @@ async def challenge_submit(body: ChallengeRequest, request: Request):
 
 
 @ip_gate_router.get("/verify/{token}")
-async def verify_token(token: str, request: Request):
+async def verify_token(token: str, request: Request, duration: str = "24h"):
     """Verify an IP via the emailed token link."""
+    valid_durations = {"24h", "7d", "30d", "90d", "permanent"}
+    if duration not in valid_durations:
+        raise HTTPException(status_code=400, detail="Invalid duration")
+
     db = _get_db(request)
 
     token_record = validate_verification_token(db, token)
@@ -238,17 +300,35 @@ async def verify_token(token: str, request: Request):
 
     ip_address = token_record["ip_address"]
     email = token_record["email"]
-    trust_duration = token_record.get("trust_duration", "24h")
+
+    # Determine access level from user's RBAC role
+    access_level = "user"
+    api_url = getattr(request.app.state, "immich_api_url", "")
+    if api_url:
+        immich_user = validate_immich_email(api_url, email)
+        if immich_user:
+            local_user, _ = get_or_create_user(db, immich_user, "user")
+            if Role[local_user.get("role", "guest").upper()] >= Role.ADMIN:
+                access_level = "admin"
 
     # Trust the IP
-    trust_ip(db, ip_address, access_level="user", trust_duration=trust_duration, verified_by=email)
+    trust_ip(db, ip_address, access_level=access_level, trust_duration=duration, verified_by=email)
     mark_token_used(db, token)
-    record_ip_connection(db, ip_address, "server-manager", "verified", user_id=email)
+    record_ip_connection(db, ip_address, "server-manager", "allowed", user_id=email)
+
+    # Notify about admin IP for Cloudflare
+    if access_level == "admin":
+        await _send_cloudflare_notification(ip_address, email, request)
+
+    logger.info("IP %s verified by %s (access=%s, duration=%s)",
+                ip_address, email, access_level, duration)
 
     return {
-        "message": "IP verified successfully",
+        "message": f"IP {ip_address} has been verified and trusted for {duration}.",
         "ip": ip_address,
-        "trust_duration": trust_duration,
+        "access_level": access_level,
+        "trust_duration": duration,
+        "redirect": "/",
     }
 
 
@@ -328,7 +408,15 @@ async def revoke(body: RevokeRequest, request: Request):
     revoke_ip(db, body.ip_address, revoked_by, body.reason)
     record_ip_connection(db, body.ip_address, "server-manager", "revoked", user_id=revoked_by)
 
-    _send_cloudflare_notification(body.ip_address, "revoke")
+    alert_manager = getattr(request.app.state, "alert_manager", None)
+    if alert_manager:
+        alert_manager.send_discord(
+            "IP Revoked",
+            f"IP `{body.ip_address}` was revoked by `{revoked_by}`."
+            + (f"\nReason: {body.reason}" if body.reason else ""),
+            "warning",
+        )
+
     return {"message": f"IP {body.ip_address} revoked"}
 
 
