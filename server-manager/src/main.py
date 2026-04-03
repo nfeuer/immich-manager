@@ -312,6 +312,22 @@ async def startup_event():
             id='ip_gate_expiry'
         )
 
+        # Schedule Cloudflare sync if enabled
+        if config.ip_gate.cloudflare.enabled:
+            from .ip_gate_cloudflare import CloudflareIPSync
+            cf_sync = CloudflareIPSync(
+                api_token=config.ip_gate.cloudflare.api_token,
+                account_id=config.ip_gate.cloudflare.account_id,
+                list_name=config.ip_gate.cloudflare.list_name,
+            )
+            app.state.cloudflare_sync = cf_sync
+            scheduler.add_job(
+                _cloudflare_sync_job,
+                'interval',
+                hours=config.ip_gate.cloudflare.reconciliation_interval_hours,
+                id='cloudflare_sync'
+            )
+
         scheduler.start()
 
         # Signal systemd that we are ready
@@ -346,6 +362,27 @@ async def _expire_ips_job():
     count = expire_stale_ips(database)
     if count > 0:
         logger.info("Expired %d stale trusted IPs", count)
+
+
+async def _cloudflare_sync_job():
+    """Reconcile Cloudflare IP list with local trusted admin IPs."""
+    if not database:
+        return
+    cf_sync = getattr(app.state, "cloudflare_sync", None)
+    if not cf_sync:
+        return
+    from shared.auth.ip_gate import list_ips_by_status
+    admin_ips = [
+        ip["ip_address"] for ip in list_ips_by_status(database, "trusted")
+        if ip.get("access_level") == "admin"
+    ]
+    success = cf_sync.sync(admin_ips)
+    if not success and alert_manager:
+        alert_manager.send_discord(
+            "Cloudflare Sync Failed",
+            "Failed to reconcile Cloudflare IP list. Check logs for details.",
+            "warning",
+        )
 
 
 async def check_disk_health_job():

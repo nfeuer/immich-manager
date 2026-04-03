@@ -462,3 +462,16 @@ async def update_ip(ip_address: str, body: UpdateIPRequest, request: Request):
         update_ip_trust_duration(db, ip_address, body.trust_duration)
 
     return {"message": f"IP {ip_address} updated"}
+
+
+@ip_gate_router.get("/management/cloudflare-status")
+async def cloudflare_status(request: Request):
+    """Get Cloudflare sync status."""
+    _require_admin_for_management(request)
+    ip_gate_config = getattr(request.app.state, "ip_gate_config", None)
+    cf_sync = getattr(request.app.state, "cloudflare_sync", None)
+    return {
+        "enabled": ip_gate_config.cloudflare.enabled if ip_gate_config else False,
+        "connected": cf_sync is not None,
+        "list_name": ip_gate_config.cloudflare.list_name if ip_gate_config else "",
+    }
