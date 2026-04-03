@@ -40,6 +40,9 @@ from .audit import ensure_audit_table, record_audit, get_audit_log
 from .logging_config import setup_json_logging
 from .logs import get_log_snapshot, stream_log_lines
 from .utils import CLEAN_ENV
+from .ip_gate_middleware import IPGateMiddleware
+from .ip_gate_routes import ip_gate_router
+from shared.auth.ip_gate import ensure_ip_gate_tables as ensure_ip_gate_db
 from shared.auth import (
     Role, ensure_users_table, get_or_create_user, require_role,
     get_all_users, update_user_role, extract_token, validate_immich_token,
@@ -57,6 +60,7 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.include_router(ip_gate_router)
 
 
 # --- Authentication ---
@@ -121,6 +125,9 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
+
+
+app.add_middleware(IPGateMiddleware)
 
 
 async def require_auth(request: Request) -> Dict[str, Any]:
@@ -190,6 +197,12 @@ async def startup_event():
         database = Database()
         ensure_audit_table(database)
         ensure_users_table(database)
+
+        # Initialize IP gate
+        ensure_ip_gate_db(database)
+        app.state.ip_gate_db = database
+        app.state.ip_gate_config = config.ip_gate
+        app.state.public_url = config.server.public_url
 
         # Initialize monitors
         all_drives = config.storage.data_drives + config.storage.parity_drives
@@ -291,6 +304,14 @@ async def startup_event():
 
         scheduler.add_job(_watchdog_heartbeat, "interval", seconds=30, id="watchdog")
 
+        # Schedule IP gate expiry checks (every 5 minutes)
+        scheduler.add_job(
+            _expire_ips_job,
+            'interval',
+            seconds=300,
+            id='ip_gate_expiry'
+        )
+
         scheduler.start()
 
         # Signal systemd that we are ready
@@ -317,6 +338,16 @@ async def shutdown_event():
 
 
 # Background jobs
+async def _expire_ips_job():
+    """Expire trusted IPs that have passed their expiry time."""
+    if not database:
+        return
+    from shared.auth.ip_gate import expire_stale_ips
+    count = expire_stale_ips(database)
+    if count > 0:
+        logger.info("Expired %d stale trusted IPs", count)
+
+
 async def check_disk_health_job():
     """Background job to check disk health"""
     if not disk_monitor or not database or not alert_manager or not config:
