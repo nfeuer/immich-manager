@@ -230,8 +230,9 @@ async def startup_event():
                 immich_api_url=config.immich.api_url,
             )
 
-        # Store Immich API URL for auth validation
+        # Store Immich API URL and key for auth validation
         app.state.immich_api_url = config.immich.api_url
+        app.state.immich_api_key = config.immich.api_key
         app.state.default_role = config.auth.default_role
 
         # Initialize scheduler

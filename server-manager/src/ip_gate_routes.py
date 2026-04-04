@@ -128,15 +128,16 @@ def _require_admin_for_management(request: Request):
     return immich_user
 
 
-def validate_immich_email(api_url: str, email: str) -> Optional[dict]:
+def validate_immich_email(api_url: str, email: str, api_key: str = "") -> Optional[dict]:
     """
     Check whether an email belongs to an Immich user.
 
-    Uses the admin API key from IMMICH_API_KEY env var. Returns the Immich
-    user dict if found, None otherwise. Uses constant-time comparison for
-    the email to avoid timing side-channels.
+    Uses the provided API key (from config) or falls back to IMMICH_API_KEY
+    env var. Returns the Immich user dict if found, None otherwise. Uses
+    constant-time comparison for the email to avoid timing side-channels.
     """
-    api_key = os.environ.get("IMMICH_API_KEY")
+    if not api_key:
+        api_key = os.environ.get("IMMICH_API_KEY", "")
     if not api_key:
         logger.warning("IMMICH_API_KEY not set; cannot validate email against Immich")
         return None
@@ -274,7 +275,8 @@ async def challenge_submit(body: ChallengeRequest, request: Request):
 
     # Check Immich for user (result intentionally unused in response)
     api_url = getattr(request.app.state, "immich_api_url", "")
-    immich_user = validate_immich_email(api_url, body.email)
+    api_key = getattr(request.app.state, "immich_api_key", "")
+    immich_user = validate_immich_email(api_url, body.email, api_key)
 
     if immich_user:
         config = getattr(request.app.state, "ip_gate_config", None)
@@ -307,8 +309,9 @@ async def verify_token(token: str, request: Request, duration: str = "24h"):
     # Determine access level from user's RBAC role
     access_level = "user"
     api_url = getattr(request.app.state, "immich_api_url", "")
+    api_key = getattr(request.app.state, "immich_api_key", "")
     if api_url:
-        immich_user = validate_immich_email(api_url, email)
+        immich_user = validate_immich_email(api_url, email, api_key)
         if immich_user:
             local_user, _ = get_or_create_user(db, immich_user, "user")
             if Role[local_user.get("role", "guest").upper()] >= Role.ADMIN:
