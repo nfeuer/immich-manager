@@ -608,6 +608,15 @@ async def root(request: Request, user: Dict = Depends(require_admin)):
     return index_path.read_text()
 
 
+@app.get("/ip-challenge", response_class=HTMLResponse)
+async def ip_challenge_page(request: Request):
+    """Serve the IP challenge page (no auth required)."""
+    index_path = Path(__file__).parent.parent / "frontend" / "dist" / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=503, detail="Dashboard not built. Run: cd frontend && npm run build")
+    return index_path.read_text()
+
+
 @app.get("/health")
 @limiter.limit("30/minute")
 async def health_check(request: Request):
