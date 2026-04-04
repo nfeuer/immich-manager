@@ -97,7 +97,7 @@ def _get_db(request: Request):
 
 def _get_client_ip(request: Request) -> str:
     """Extract client IP using same logic as the middleware."""
-    from ip_gate_middleware import get_client_ip
+    from .ip_gate_middleware import get_client_ip
 
     config = getattr(request.app.state, "ip_gate_config", None)
     trusted_proxies = config.trusted_proxy_ips if config else []

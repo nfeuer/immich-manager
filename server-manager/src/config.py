@@ -130,7 +130,7 @@ class CloudflareConfig(BaseModel):
 
 class IPGateConfig(BaseModel):
     """IP gate security monitoring configuration"""
-    enabled: bool = True
+    enabled: bool = False
     trusted_proxy_ips: List[str] = Field(default_factory=lambda: ["127.0.0.1", "172.17.0.1"])
     token_expiry_minutes: int = 15
     email_rate_limit: str = "3/15minutes"
