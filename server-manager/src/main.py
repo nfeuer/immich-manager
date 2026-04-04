@@ -215,6 +215,7 @@ async def startup_event():
 
         # Initialize alert manager
         alert_manager = AlertManager(config.alerts)
+        app.state.alert_manager = alert_manager
 
         # Initialize update checker
         update_checker = UpdateChecker(docker_monitor, immich_api_url=config.immich.api_url)
