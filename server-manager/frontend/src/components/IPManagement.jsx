@@ -32,7 +32,7 @@ function TrustedTab() {
   const [revokeReason, setRevokeReason] = useState('')
 
   if (isLoading) return <p className="text-immich-muted text-sm">Loading...</p>
-  const ips = data?.ips || []
+  const ips = data?.trusted || []
 
   return (
     <div className="overflow-x-auto">
@@ -64,7 +64,7 @@ function TrustedTab() {
               <td className="py-2 pr-4 text-xs">{ip.trust_duration}</td>
               <td className="py-2 pr-4 text-xs">{ip.expires_at ? new Date(ip.expires_at).toLocaleDateString() : 'Never'}</td>
               <td className="py-2 pr-4 text-xs">{timeAgo(ip.last_seen)}</td>
-              <td className="py-2 pr-4 text-xs">{ip.connection_count_7d ?? 0}</td>
+              <td className="py-2 pr-4 text-xs">{ip.connections_7d ?? 0}</td>
               <td className="py-2 flex gap-2">
                 <button onClick={() => { setEditingIp(ip.ip_address); setEditLabel(ip.label || ''); setEditDuration(ip.trust_duration || '24h') }}
                   className="text-xs text-blue-400 hover:text-blue-300">Edit</button>
@@ -130,7 +130,7 @@ function PendingTab() {
   const [approveLevel, setApproveLevel] = useState('user')
 
   if (isLoading) return <p className="text-immich-muted text-sm">Loading...</p>
-  const ips = data?.ips || []
+  const ips = data?.pending || []
 
   return (
     <div className="overflow-x-auto">
@@ -201,7 +201,7 @@ function BlacklistedTab() {
   const deleteMut = useDeleteIP()
 
   if (isLoading) return <p className="text-immich-muted text-sm">Loading...</p>
-  const ips = data?.ips || []
+  const ips = data?.revoked || []
 
   return (
     <div className="overflow-x-auto">
