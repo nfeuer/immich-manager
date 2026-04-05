@@ -8,13 +8,18 @@ get a hard 403.
 """
 
 import logging
-from typing import List
+import time
+from typing import Dict, List
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
+
+# Cache last_seen writes — only update DB once per IP per 60 seconds
+_last_seen_cache: Dict[str, float] = {}
+_LAST_SEEN_INTERVAL = 60
 
 EXEMPT_PATHS = [
     "/api/ip-gate/verify/",
@@ -73,14 +78,18 @@ class IPGateMiddleware(BaseHTTPMiddleware):
         trusted_proxies = ip_gate_config.trusted_proxy_ips
         client_ip = get_client_ip(request, trusted_proxies)
 
-        from shared.auth.ip_gate import check_ip_access, insert_pending_ip, record_ip_connection
+        from shared.auth.ip_gate import check_ip_access, insert_pending_ip, record_ip_connection, update_last_seen
 
         service = "server-manager"
         result = check_ip_access(db, client_ip, service)
         action = result["action"]
 
         if action == "allow":
-            record_ip_connection(db, client_ip, service, "allowed")
+            # Only update last_seen, throttled to once per minute per IP
+            now = time.monotonic()
+            if now - _last_seen_cache.get(client_ip, 0) > _LAST_SEEN_INTERVAL:
+                update_last_seen(db, client_ip)
+                _last_seen_cache[client_ip] = now
             return await call_next(request)
 
         if action == "block":
