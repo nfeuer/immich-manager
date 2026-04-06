@@ -288,6 +288,7 @@ class Database:
         # Initialize database
         self._init_db()
         self._run_migrations()
+        self._fix_blob_floats()
 
     @contextmanager
     def _get_connection(self):
@@ -415,6 +416,45 @@ class Database:
                         (1, "initial schema"),
                     )
 
+    def _fix_blob_floats(self):
+        """One-time fix: convert any BLOB-stored floats back to REAL values.
+
+        Numpy float32 scalars were accidentally stored as raw bytes by SQLite.
+        """
+        import struct
+        float_cols = [
+            'score', 'technical_quality', 'blur_score', 'exposure_score',
+            'composition_score', 'face_score', 'megapixels',
+        ]
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            fixed = 0
+            for col in float_cols:
+                cursor.execute(
+                    f'SELECT id, {col} FROM photo_scores WHERE typeof({col}) = "blob"'
+                )
+                for row_id, blob_val in cursor.fetchall():
+                    if len(blob_val) == 4:
+                        real_val = struct.unpack('<f', blob_val)[0]
+                    elif len(blob_val) == 8:
+                        real_val = struct.unpack('<d', blob_val)[0]
+                    else:
+                        continue
+                    cursor.execute(
+                        f'UPDATE photo_scores SET {col} = ? WHERE id = ?',
+                        (float(real_val), row_id),
+                    )
+                    fixed += 1
+            if fixed:
+                logger.info(f"Fixed {fixed} BLOB-stored float values in photo_scores")
+
+    @staticmethod
+    def _to_float(val):
+        """Convert numpy/non-standard numeric types to Python float for SQLite."""
+        if val is None:
+            return None
+        return float(val)
+
     def save_photo_score(self, asset_id: str, user_id: str, year: int, month: int, scores: Dict[str, Any]):
         """Save or update photo score"""
         with self._get_connection() as conn:
@@ -436,12 +476,12 @@ class Database:
                     perceptual_hash, width, height, megapixels, metadata
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                asset_id, user_id, year, month, scores.get('score', 0),
-                scores.get('technical_quality'), scores.get('blur_score'),
-                scores.get('exposure_score'), scores.get('composition_score'),
-                scores.get('face_score'), scores.get('face_count', 0),
+                asset_id, user_id, year, month, self._to_float(scores.get('score', 0)),
+                self._to_float(scores.get('technical_quality')), self._to_float(scores.get('blur_score')),
+                self._to_float(scores.get('exposure_score')), self._to_float(scores.get('composition_score')),
+                self._to_float(scores.get('face_score')), scores.get('face_count', 0),
                 scores.get('perceptual_hash'),
-                scores.get('width'), scores.get('height'), scores.get('megapixels'),
+                scores.get('width'), scores.get('height'), self._to_float(scores.get('megapixels')),
                 json.dumps(metadata)
             ))
 
