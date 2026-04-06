@@ -68,7 +68,7 @@ def send_ssh_alert(ip_address: str, ssh_user: str):
         from config import load_config
         from alerts import AlertManager
 
-        config = load_config()
+        config, _ = load_config()
         alert_mgr = AlertManager(config.alerts)
 
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")

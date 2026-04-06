@@ -28,7 +28,7 @@ import sdnotify
 # Add project root to path for shared library
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from .config import load_config, Config
+from .config import load_config, save_config, Config, DiscordConfig, DigestConfig, QuietHoursConfig
 from .database import Database
 from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
 from .backup import BackupManager
@@ -69,7 +69,7 @@ app.include_router(ip_gate_router)
 def _get_allowed_origins() -> List[str]:
     """Build allowed origins from config at startup."""
     try:
-        cfg = load_config()
+        cfg, _ = load_config()
         immich_url = cfg.immich.api_url.rsplit("/api", 1)[0]
         origins = [
             f"http://localhost:{cfg.server.port}",
@@ -173,6 +173,7 @@ async def require_admin(request: Request) -> Dict[str, Any]:
 
 # Global state
 config: Optional[Config] = None
+config_path: Optional[str] = None
 database: Optional[Database] = None
 disk_monitor: Optional[DiskMonitor] = None
 system_monitor: Optional[SystemMonitor] = None
@@ -187,12 +188,12 @@ scheduler: Optional[AsyncIOScheduler] = None
 @app.on_event("startup")
 async def startup_event():
     """Initialize application on startup"""
-    global config, database, disk_monitor, system_monitor, docker_monitor
+    global config, config_path, database, disk_monitor, system_monitor, docker_monitor
     global backup_manager, alert_manager, update_checker, auto_updater, scheduler
 
     try:
         # Load configuration
-        config = load_config()
+        config, config_path = load_config()
 
         # Initialize database
         database = Database()
@@ -794,6 +795,104 @@ async def trigger_digest(request: Request, user: Dict = Depends(require_admin)):
         raise HTTPException(status_code=502, detail="Failed to send digest to Discord")
 
     return {"status": "sent"}
+
+
+# --- Discord config management ---
+
+class DiscordConfigUpdate(BaseModel):
+    """Request body for updating Discord-related configuration."""
+    discord: Optional[Dict[str, Any]] = None
+    digest: Optional[Dict[str, Any]] = None
+    quiet_hours: Optional[Dict[str, Any]] = None
+
+
+@app.get("/api/config/discord")
+@limiter.limit("10/minute")
+async def get_discord_config(request: Request, user: Dict = Depends(require_admin)):
+    """Return current Discord, digest, and quiet-hours configuration."""
+    if not config:
+        raise HTTPException(status_code=503, detail="Configuration not loaded")
+
+    return {
+        "discord": config.alerts.discord.model_dump(),
+        "digest": config.alerts.digest.model_dump(),
+        "quiet_hours": config.alerts.quiet_hours.model_dump(),
+    }
+
+
+@app.put("/api/config/discord")
+@limiter.limit("10/minute")
+async def update_discord_config(
+    request: Request,
+    body: DiscordConfigUpdate,
+    user: Dict = Depends(require_admin),
+):
+    """Update Discord, digest, and/or quiet-hours configuration and persist to disk."""
+    if not config or not config_path:
+        raise HTTPException(status_code=503, detail="Configuration not loaded")
+
+    old_digest_schedule = config.alerts.digest.schedule
+    old_digest_enabled = config.alerts.digest.enabled
+
+    # Apply updates to in-memory config
+    if body.discord is not None:
+        config.alerts.discord = DiscordConfig(**{
+            **config.alerts.discord.model_dump(),
+            **body.discord,
+        })
+    if body.digest is not None:
+        config.alerts.digest = DigestConfig(**{
+            **config.alerts.digest.model_dump(),
+            **body.digest,
+        })
+    if body.quiet_hours is not None:
+        config.alerts.quiet_hours = QuietHoursConfig(**{
+            **config.alerts.quiet_hours.model_dump(),
+            **body.quiet_hours,
+        })
+
+    # Keep alert_manager in sync (it holds a reference to config.alerts)
+    if alert_manager:
+        alert_manager.config = config.alerts
+
+    # Reschedule digest job if schedule or enabled state changed
+    if scheduler:
+        new_schedule = config.alerts.digest.schedule
+        new_enabled = config.alerts.digest.enabled
+
+        if old_digest_enabled and (not new_enabled or new_schedule != old_digest_schedule):
+            try:
+                scheduler.remove_job('discord_digest')
+            except Exception:
+                pass
+
+        if new_enabled and (not old_digest_enabled or new_schedule != old_digest_schedule):
+            try:
+                scheduler.remove_job('discord_digest')
+            except Exception:
+                pass
+            scheduler.add_job(
+                digest_job,
+                CronTrigger.from_crontab(new_schedule),
+                id='discord_digest',
+            )
+
+    # Persist to YAML
+    save_config(config, config_path)
+
+    if database:
+        record_audit(
+            database, "config_updated",
+            user_id=user.get("id"),
+            details="Discord/digest/quiet-hours config updated via UI",
+            ip_address=request.client.host if request.client else None,
+        )
+
+    return {
+        "discord": config.alerts.discord.model_dump(),
+        "digest": config.alerts.digest.model_dump(),
+        "quiet_hours": config.alerts.quiet_hours.model_dump(),
+    }
 
 
 @app.get("/api/immich-update")
@@ -1427,7 +1526,7 @@ app.mount(
 def main():
     """Run the server"""
     try:
-        config = load_config()
+        config, _ = load_config()
 
         uvicorn.run(
             "src.main:app",
