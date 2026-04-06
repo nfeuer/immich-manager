@@ -6,7 +6,7 @@ import os
 import re
 import yaml
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -189,7 +189,7 @@ def _resolve_env_vars(obj):
     return obj
 
 
-def load_config(config_path: Optional[str] = None) -> Config:
+def load_config(config_path: Optional[str] = None) -> Tuple[Config, str]:
     """
     Load configuration from YAML file.
 
@@ -199,7 +199,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         config_path: Path to config file, defaults to config/config.yaml
 
     Returns:
-        Config object
+        Tuple of (Config object, resolved config file path)
 
     Raises:
         FileNotFoundError: If config file doesn't exist
@@ -228,7 +228,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
 
     config_data = _resolve_env_vars(config_data)
 
-    return Config(**config_data)
+    return Config(**config_data), config_path
 
 
 def save_config(config: Config, config_path: str = "config/config.yaml"):

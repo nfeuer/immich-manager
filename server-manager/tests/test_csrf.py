@@ -10,7 +10,7 @@ def _make_cfg(public_url="", port=8080, api_url="http://localhost:2283/api"):
 
 def test_allowed_origins_includes_localhost(monkeypatch):
     from src.main import _get_allowed_origins
-    monkeypatch.setattr("src.main.load_config", lambda: _make_cfg())
+    monkeypatch.setattr("src.main.load_config", lambda: (_make_cfg(), "config/config.yaml"))
     origins = _get_allowed_origins()
     assert "http://localhost:8080" in origins
     assert "http://127.0.0.1:8080" in origins
@@ -18,7 +18,7 @@ def test_allowed_origins_includes_localhost(monkeypatch):
 
 def test_allowed_origins_includes_immich_base_url(monkeypatch):
     from src.main import _get_allowed_origins
-    monkeypatch.setattr("src.main.load_config", lambda: _make_cfg())
+    monkeypatch.setattr("src.main.load_config", lambda: (_make_cfg(), "config/config.yaml"))
     origins = _get_allowed_origins()
     assert "http://localhost:2283" in origins
 
@@ -26,13 +26,13 @@ def test_allowed_origins_includes_immich_base_url(monkeypatch):
 def test_allowed_origins_includes_public_url_when_set(monkeypatch):
     from src.main import _get_allowed_origins
     monkeypatch.setattr("src.main.load_config",
-                        lambda: _make_cfg(public_url="https://monitor.houseoffeuer.com"))
+                        lambda: (_make_cfg(public_url="https://monitor.houseoffeuer.com"), "config/config.yaml"))
     origins = _get_allowed_origins()
     assert "https://monitor.houseoffeuer.com" in origins
 
 
 def test_allowed_origins_omits_empty_public_url(monkeypatch):
     from src.main import _get_allowed_origins
-    monkeypatch.setattr("src.main.load_config", lambda: _make_cfg(public_url=""))
+    monkeypatch.setattr("src.main.load_config", lambda: (_make_cfg(public_url=""), "config/config.yaml"))
     origins = _get_allowed_origins()
     assert "" not in origins
