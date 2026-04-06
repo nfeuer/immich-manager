@@ -8,7 +8,7 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, time as dt_time, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +166,51 @@ class AlertManager:
 
         except Exception as e:
             logger.error(f"Failed to send Discord notification: {e}")
+            return False
+
+    def send_discord_digest(
+        self,
+        title: str,
+        description: str,
+        fields: List[Dict[str, Any]],
+        color: int = 0x2ECC71,
+    ) -> bool:
+        """Send a multi-field digest embed to Discord. Ignores quiet hours."""
+        discord_cfg = getattr(self.config, "discord", None)
+        if not discord_cfg or not discord_cfg.enabled or not discord_cfg.webhook_url:
+            logger.warning("Discord digest skipped: Discord not enabled or configured")
+            return False
+
+        try:
+            bot_name = discord_cfg.bot_name or "Immich Manager"
+
+            # Enforce Discord embed limits
+            capped_fields = fields[:25]
+            for field in capped_fields:
+                if len(field.get("value", "")) > 1024:
+                    field["value"] = field["value"][:1021] + "..."
+
+            payload = {
+                "username": bot_name,
+                "embeds": [{
+                    "title": title,
+                    "description": description,
+                    "color": color,
+                    "timestamp": datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%S.%fZ"
+                    ),
+                    "fields": capped_fields,
+                    "footer": {
+                        "text": discord_cfg.server_name or "Immich Manager",
+                    },
+                }],
+            }
+
+            resp = requests.post(discord_cfg.webhook_url, json=payload, timeout=10)
+            return resp.status_code in (200, 204)
+
+        except Exception as e:
+            logger.error(f"Failed to send Discord digest: {e}")
             return False
 
     # ------------------------------------------------------------------

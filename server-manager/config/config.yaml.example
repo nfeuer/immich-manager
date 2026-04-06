@@ -128,3 +128,12 @@ alerts:
     enabled: true
     start: "22:00"
     end: "08:00"
+  digest:
+    enabled: false                   # Enable scheduled Discord digest summaries
+    schedule: "0 9 * * *"           # Cron expression (default: daily at 9 AM)
+    sections:                        # Which sections to include in the digest
+      - system                       # CPU, memory, disk usage
+      - storage                      # Per-drive SMART health summary
+      - backups                      # Recent backup status
+      - containers                   # Immich container health
+      - alerts                       # Unacknowledged alert counts

@@ -35,6 +35,7 @@ from .backup import BackupManager
 from .alerts import AlertManager
 from .update_checker import UpdateChecker
 from .auto_updater import AutoUpdater
+from .digest import build_digest
 from .prometheus import generate_metrics
 from .audit import ensure_audit_table, record_audit, get_audit_log
 from .logging_config import setup_json_logging
@@ -284,6 +285,15 @@ async def startup_event():
                 id='snapshot_cleanup'
             )
 
+        # Scheduled Discord digest
+        if config.alerts.digest.enabled:
+            digest_trigger = CronTrigger.from_crontab(config.alerts.digest.schedule)
+            scheduler.add_job(
+                digest_job,
+                digest_trigger,
+                id='discord_digest'
+            )
+
         # Watchdog heartbeat (every 30s, half of WatchdogSec=60)
         async def _watchdog_heartbeat():
             sd = sdnotify.SystemdNotifier(debug=False)
@@ -530,6 +540,29 @@ async def snapshot_cleanup_job():
         print(f"Error cleaning up snapshots: {e}")
 
 
+async def digest_job():
+    """Background job to send scheduled Discord digest."""
+    if not alert_manager or not database or not system_monitor or not config:
+        return
+
+    try:
+        title, description, fields, color = await build_digest(
+            database=database,
+            system_monitor=system_monitor,
+            disk_monitor=disk_monitor,
+            docker_monitor=docker_monitor,
+            config=config,
+            sections=config.alerts.digest.sections,
+        )
+        success = alert_manager.send_discord_digest(title, description, fields, color)
+        if success:
+            logger.info("Discord digest sent successfully")
+        else:
+            logger.warning("Discord digest failed to send")
+    except Exception as e:
+        logger.error(f"Error in digest job: {e}")
+
+
 # API Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, user: Dict = Depends(require_admin)):
@@ -652,6 +685,34 @@ async def test_alert(request: Request, user: Dict = Depends(require_admin)):
         "This is a test alert from Immich Server Manager",
         "info"
     )
+
+    return {"status": "sent"}
+
+
+@app.post("/api/digest/trigger")
+@limiter.limit("3/minute")
+async def trigger_digest(request: Request, user: Dict = Depends(require_admin)):
+    """Manually trigger a Discord digest."""
+    if not alert_manager or not database or not system_monitor:
+        raise HTTPException(status_code=503, detail="Required services not initialized")
+
+    sections = (
+        config.alerts.digest.sections
+        if config
+        else ["system", "backups", "containers", "alerts"]
+    )
+    title, description, fields, color = await build_digest(
+        database=database,
+        system_monitor=system_monitor,
+        disk_monitor=disk_monitor,
+        docker_monitor=docker_monitor,
+        config=config,
+        sections=sections,
+    )
+    success = alert_manager.send_discord_digest(title, description, fields, color)
+
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to send digest to Discord")
 
     return {"status": "sent"}
 

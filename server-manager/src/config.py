@@ -97,12 +97,22 @@ class DiscordConfig(BaseModel):
     server_name: str = ""  # Optional: your server's display name
 
 
+class DigestConfig(BaseModel):
+    """Scheduled Discord digest configuration"""
+    enabled: bool = False
+    schedule: str = "0 9 * * *"  # cron expression, default daily 9 AM
+    sections: List[str] = Field(
+        default_factory=lambda: ["system", "storage", "backups", "containers", "alerts"]
+    )
+
+
 class AlertsConfig(BaseModel):
     """Alerts configuration"""
     email: EmailConfig = Field(default_factory=EmailConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     quiet_hours: QuietHoursConfig = Field(default_factory=QuietHoursConfig)
+    digest: DigestConfig = Field(default_factory=DigestConfig)
 
 
 class AuthConfig(BaseModel):
