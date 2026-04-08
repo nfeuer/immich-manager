@@ -23,6 +23,8 @@ const TAB_LABELS = {
 
 const LEVELS = ['error', 'warn', 'info', 'debug', 'untagged']
 
+const MAX_LINES = 2000
+
 const LEVEL_LABELS = {
   error: 'Error',
   warn: 'Warn',
@@ -77,7 +79,8 @@ export default function LogViewer() {
       const r = await fetch(`/api/logs/${encodeURIComponent(service)}`)
       if (!r.ok) throw new Error(r.status)
       const data = await r.json()
-      setLogLines(data.lines ?? [])
+      const lines = data.lines ?? []
+      setLogLines(lines.length > MAX_LINES ? lines.slice(-MAX_LINES) : lines)
     } catch (e) {
       setLogLines([{ level: 'error', text: `Error loading logs: ${e.message}` }])
     } finally {
@@ -90,7 +93,10 @@ export default function LogViewer() {
     if (pendingLinesRef.current.length === 0) return
     const batch = pendingLinesRef.current
     pendingLinesRef.current = []
-    setLogLines((prev) => [...prev, ...batch])
+    setLogLines((prev) => {
+      const next = [...prev, ...batch]
+      return next.length > MAX_LINES ? next.slice(-MAX_LINES) : next
+    })
   }, [])
 
   const startStream = useCallback((service) => {
@@ -213,6 +219,9 @@ export default function LogViewer() {
             Live
           </span>
         </label>
+        {logLines.length >= MAX_LINES && (
+          <span className="text-xs text-immich-muted">Showing last {MAX_LINES.toLocaleString()} lines</span>
+        )}
       </div>
 
       {/* Level filter bar */}
