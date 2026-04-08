@@ -57,7 +57,7 @@ describe('AlertsPanel', () => {
       },
     })
     const { container } = render(React.createElement(AlertsPanel), { wrapper })
-    expect(container.querySelector('.bg-red-900\\/20')).toBeInTheDocument()
+    expect(container.querySelector('.bg-immich-error-muted')).toBeInTheDocument()
   })
 
   it('applies warning severity styling', () => {
@@ -69,6 +69,6 @@ describe('AlertsPanel', () => {
       },
     })
     const { container } = render(React.createElement(AlertsPanel), { wrapper })
-    expect(container.querySelector('.bg-yellow-900\\/20')).toBeInTheDocument()
+    expect(container.querySelector('.bg-immich-warning-muted')).toBeInTheDocument()
   })
 })
