@@ -346,65 +346,99 @@ function ConnectionsTab() {
 
   return (
     <div>
-      <div className="flex gap-3 mb-4">
-        <label htmlFor="conn-filter-ip" className="sr-only">Filter by IP</label>
-        <input id="conn-filter-ip" placeholder="Filter by IP" onChange={(e) => setFilters(f => ({ ...f, ip: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text w-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary" />
-        <label htmlFor="conn-filter-service" className="sr-only">Filter by service</label>
-        <select id="conn-filter-service" onChange={(e) => setFilters(f => ({ ...f, service: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
-          <option value="">All services</option>
-          <option value="server-manager">server-manager</option>
-          <option value="photo-curator">photo-curator</option>
-          <option value="ssh">ssh</option>
-        </select>
-        <label htmlFor="conn-filter-action" className="sr-only">Filter by action</label>
-        <select id="conn-filter-action" onChange={(e) => setFilters(f => ({ ...f, action: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
-          <option value="">All actions</option>
-          <option value="allowed">allowed</option>
-          <option value="challenged">challenged</option>
-          <option value="blocked">blocked</option>
-          <option value="alert_sent">alert_sent</option>
-        </select>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+        <div>
+          <label htmlFor="conn-filter-ip" className="sr-only">Filter by IP</label>
+          <input id="conn-filter-ip" placeholder="Filter by IP" onChange={(e) => setFilters(f => ({ ...f, ip: e.target.value || undefined }))}
+            className="w-full px-2 py-2 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary" />
+        </div>
+        <div>
+          <label htmlFor="conn-filter-service" className="sr-only">Filter by service</label>
+          <select id="conn-filter-service" onChange={(e) => setFilters(f => ({ ...f, service: e.target.value || undefined }))}
+            className="w-full px-2 py-2 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
+            <option value="">All services</option>
+            <option value="server-manager">server-manager</option>
+            <option value="photo-curator">photo-curator</option>
+            <option value="ssh">ssh</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="conn-filter-action" className="sr-only">Filter by action</label>
+          <select id="conn-filter-action" onChange={(e) => setFilters(f => ({ ...f, action: e.target.value || undefined }))}
+            className="w-full px-2 py-2 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
+            <option value="">All actions</option>
+            <option value="allowed">allowed</option>
+            <option value="challenged">challenged</option>
+            <option value="blocked">blocked</option>
+            <option value="alert_sent">alert_sent</option>
+          </select>
+        </div>
       </div>
       {isLoading ? (
         <p className="text-immich-muted text-sm">Loading...</p>
       ) : (
-        <div className="overflow-x-auto max-h-64 sm:max-h-80 md:max-h-96 overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-immich-surface">
-              <tr className="text-immich-muted text-left border-b border-immich-border">
-                <th scope="col" className="pb-2 pr-4">Timestamp</th>
-                <th scope="col" className="pb-2 pr-4">IP Address</th>
-                <th scope="col" className="pb-2 pr-4">Service</th>
-                <th scope="col" className="pb-2 pr-4">Action</th>
-                <th scope="col" className="pb-2">User</th>
-              </tr>
-            </thead>
-            <tbody>
-              {connections.map((c, i) => (
-                <tr key={i} className="border-b border-immich-border/50">
-                  <td className="py-1.5 pr-4 text-xs">{timeAgo(c.timestamp)}</td>
-                  <td className="py-1.5 pr-4 font-mono text-xs">{c.ip_address}</td>
-                  <td className="py-1.5 pr-4 text-xs">{c.service}</td>
-                  <td className="py-1.5 pr-4">
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto max-h-64 sm:max-h-80 md:max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-immich-surface">
+                <tr className="text-immich-muted text-left border-b border-immich-border">
+                  <th scope="col" className="pb-2 pr-4">Timestamp</th>
+                  <th scope="col" className="pb-2 pr-4">IP Address</th>
+                  <th scope="col" className="pb-2 pr-4">Service</th>
+                  <th scope="col" className="pb-2 pr-4">Action</th>
+                  <th scope="col" className="pb-2">User</th>
+                </tr>
+              </thead>
+              <tbody>
+                {connections.map((c) => (
+                  <tr key={`${c.timestamp}-${c.ip_address}`} className="border-b border-immich-border/50">
+                    <td className="py-1.5 pr-4 text-xs">{timeAgo(c.timestamp)}</td>
+                    <td className="py-1.5 pr-4 font-mono text-xs">{c.ip_address}</td>
+                    <td className="py-1.5 pr-4 text-xs">{c.service}</td>
+                    <td className="py-1.5 pr-4">
+                      <span className={`text-xs ${
+                        c.action === 'allowed' ? 'text-immich-success' :
+                        c.action === 'blocked' ? 'text-immich-error' :
+                        c.action === 'challenged' ? 'text-immich-warning' :
+                        'text-immich-log-untagged'
+                      }`}>{c.action}</span>
+                    </td>
+                    <td className="py-1.5 text-xs">{c.user_id || '\u2014'}</td>
+                  </tr>
+                ))}
+                {connections.length === 0 && (
+                  <tr><td colSpan={5} className="py-4 text-center text-immich-muted">No connections logged</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-2 max-h-96 overflow-y-auto">
+            {connections.length === 0 ? (
+              <p className="py-4 text-center text-immich-muted text-sm">No connections logged</p>
+            ) : (
+              connections.map((c) => (
+                <div key={`${c.timestamp}-${c.ip_address}`} className="bg-immich-bg border border-immich-border rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-mono text-xs break-all">{c.ip_address}</span>
                     <span className={`text-xs ${
                       c.action === 'allowed' ? 'text-immich-success' :
                       c.action === 'blocked' ? 'text-immich-error' :
                       c.action === 'challenged' ? 'text-immich-warning' :
                       'text-immich-log-untagged'
                     }`}>{c.action}</span>
-                  </td>
-                  <td className="py-1.5 text-xs">{c.user_id || '\u2014'}</td>
-                </tr>
-              ))}
-              {connections.length === 0 && (
-                <tr><td colSpan={5} className="py-4 text-center text-immich-muted">No connections logged</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                  <div className="flex justify-between text-xs text-immich-muted">
+                    <span>{c.service} {c.user_id ? `· ${c.user_id}` : ''}</span>
+                    <span>{timeAgo(c.timestamp)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
       )}
     </div>
   )
