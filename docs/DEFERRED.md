@@ -15,3 +15,5 @@ Items intentionally scoped out of prior fix passes. Revisit when the context war
 - **Dashboard card grid variety** — Server Manager's 4 identical status cards (System/Immich/Disk/Backups) were flagged as a minor "card grid" anti-pattern tell. Fixing requires a visual redesign, not a fix.
 
 - **BottomTabBar overflow pattern** — Currently hides labels under 360px. If 7+ nav items are added, consider a "More" overflow menu.
+
+- **Button component migration** — `server-manager/frontend/src/components/Button.jsx` was extracted (with tests) but no consumer sites have been migrated. `ServiceControls`, `BackupsCard`, `UpdateManagement`, `IPManagement`, `DiscordConfig`, `ConfirmDialog`, and `LogViewer` still ship bespoke `<button>` class strings. Migrating them is a follow-up sweep that should also consolidate `ConfirmDialog`'s action buttons.
