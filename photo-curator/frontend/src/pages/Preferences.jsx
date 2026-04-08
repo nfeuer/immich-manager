@@ -34,7 +34,7 @@ export default function Preferences() {
             max={200}
             value={monthlyTarget}
             onChange={e => setMonthlyTarget(Number(e.target.value))}
-            className="mt-1 w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus:border-immich-primary"
+            className="mt-1 w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
           />
         </label>
         <button

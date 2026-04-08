@@ -287,7 +287,7 @@ export default function Import() {
                 placeholder="/opt/photos-import"
                 value={serverPath}
                 onChange={(e) => setServerPath(e.target.value)}
-                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm font-mono placeholder:text-immich-muted focus:outline-none focus:border-immich-primary"
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm font-mono placeholder:text-immich-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
               />
             </div>
 
@@ -297,7 +297,7 @@ export default function Import() {
                 data-testid="server-path-source-type"
                 value={serverPathSourceType}
                 onChange={(e) => setServerPathSourceType(e.target.value)}
-                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus:border-immich-primary"
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
               >
                 <option value="folder">Plain folder (any photos, no special format)</option>
                 <option value="google">Google Takeout export</option>
