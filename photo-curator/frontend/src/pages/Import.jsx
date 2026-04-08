@@ -2,6 +2,10 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../utils/api'
 
+// Detect once at module load — this never changes for a given browser
+const SUPPORTS_WEBKITDIRECTORY = typeof document !== 'undefined' &&
+  'webkitdirectory' in document.createElement('input')
+
 const SOURCES = [
   { id: 'google', label: 'Google Photos', desc: 'Import from a Google Takeout export' },
   { id: 'apple', label: 'Apple Photos', desc: 'Import from an Apple Photos export (File → Export Originals)' },
@@ -180,19 +184,30 @@ export default function Import() {
             </span>
           </div>
 
+          {!SUPPORTS_WEBKITDIRECTORY && (
+            <div className="p-3 bg-immich-warning-muted border border-immich-warning-border rounded-lg text-immich-warning text-sm">
+              Folder uploads aren't supported on this browser. Use a desktop browser (Chrome, Edge, or Safari 14+), or ask an admin to use the Server Path option.
+            </div>
+          )}
+
           <div
             data-testid="file-drop-zone"
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+            onDragOver={(e) => { if (SUPPORTS_WEBKITDIRECTORY) { e.preventDefault(); setDragOver(true) } }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
-              dragOver
-                ? 'border-immich-primary bg-immich-primary/5'
-                : 'border-immich-border hover:border-immich-primary'
+            onDrop={(e) => SUPPORTS_WEBKITDIRECTORY && handleDrop(e)}
+            onClick={() => SUPPORTS_WEBKITDIRECTORY && fileInputRef.current?.click()}
+            aria-disabled={!SUPPORTS_WEBKITDIRECTORY}
+            className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+              !SUPPORTS_WEBKITDIRECTORY
+                ? 'border-immich-border opacity-50 cursor-not-allowed'
+                : dragOver
+                  ? 'border-immich-primary bg-immich-primary/5 cursor-pointer'
+                  : 'border-immich-border hover:border-immich-primary cursor-pointer'
             }`}
           >
-            <p className="text-immich-muted mb-1">Click to select a folder, or drag and drop</p>
+            <p className="text-immich-muted mb-1">
+              {SUPPORTS_WEBKITDIRECTORY ? 'Click to select a folder, or drag and drop' : 'Folder selection unavailable on this browser'}
+            </p>
             <p className="text-immich-muted text-xs">Supports JPG, PNG, HEIC, MP4, MOV and more</p>
             <input
               ref={fileInputRef}
@@ -201,6 +216,7 @@ export default function Import() {
               className="hidden"
               webkitdirectory=""
               multiple
+              disabled={!SUPPORTS_WEBKITDIRECTORY}
               onChange={handleFileChange}
             />
           </div>
@@ -240,9 +256,9 @@ export default function Import() {
 
           <button
             data-testid="btn-start-import"
-            disabled={!files || files.length === 0 || uploadMutation.isPending}
+            disabled={!SUPPORTS_WEBKITDIRECTORY || !files || files.length === 0 || uploadMutation.isPending}
             onClick={() => uploadMutation.mutate()}
-            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-immich-primary"
+            className="px-4 py-2 bg-immich-primary hover:bg-immich-primary-hover text-white font-medium rounded-lg disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             Start Import
           </button>
