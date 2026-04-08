@@ -35,7 +35,13 @@ export default function Events() {
               {/* Thumbnail strip */}
               <div className="flex h-24 gap-0.5">
                 {(event.thumbnails ?? []).slice(0, 3).map((url, i) => (
-                  <img key={i} src={url} alt={`${event.title ?? 'Event'} photo ${i + 1}`} className="flex-1 object-cover" loading="lazy" />
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`${event.title ?? 'Event'} — preview ${i + 1}`}
+                    className="flex-1 object-cover"
+                    loading="lazy"
+                  />
                 ))}
               </div>
               <div className="p-3">

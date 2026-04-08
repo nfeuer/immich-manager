@@ -25,6 +25,7 @@ export default function BottomTabBar() {
           key={to}
           to={to}
           end={to === '/'}
+          aria-label={label}
           className={({ isActive }) =>
             `flex-1 flex flex-col items-center py-2 gap-0.5 text-xs transition-colors ${
               isActive ? 'text-immich-primary' : 'text-immich-muted'
@@ -32,7 +33,7 @@ export default function BottomTabBar() {
           }
         >
           <Icon className="w-5 h-5" />
-          <span>{label}</span>
+          <span className="hidden min-[360px]:inline">{label}</span>
         </NavLink>
       ))}
     </nav>
