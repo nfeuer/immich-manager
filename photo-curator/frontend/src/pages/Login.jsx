@@ -11,7 +11,7 @@ export default function Login({ loginUrl }) {
         {loginUrl ? (
           <a
             href={loginUrl}
-            className="inline-block w-full px-4 py-2 bg-immich-primary text-white font-medium rounded-lg hover:opacity-90 transition-opacity"
+            className="inline-block w-full px-4 py-2 bg-immich-primary text-white font-medium rounded-lg hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             Sign in via Immich
           </a>

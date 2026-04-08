@@ -26,8 +26,8 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-immich-bg flex items-center justify-center p-8">
-          <div className="bg-immich-surface border border-red-800 rounded-2xl p-6 max-w-lg w-full">
-            <h2 className="text-red-400 font-semibold mb-2">Something went wrong</h2>
+          <div className="bg-immich-surface border border-immich-error-border rounded-2xl p-6 max-w-lg w-full">
+            <h2 className="text-immich-error font-semibold mb-2">Something went wrong</h2>
             <pre className="text-immich-muted text-xs font-mono whitespace-pre-wrap">
               {this.state.error?.message}
             </pre>

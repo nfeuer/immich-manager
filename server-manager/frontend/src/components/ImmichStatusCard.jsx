@@ -1,15 +1,15 @@
 import { CheckCircleIcon, ExclamationCircleIcon, CubeIcon } from '@heroicons/react/24/outline'
 import { useStatus } from '../hooks/useDashboard.js'
+import StatusBadge from './StatusBadge.jsx'
 
 function HealthBadge({ healthy }) {
-  return healthy ? (
-    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900/40 text-green-400 border border-green-800">
-      <CheckCircleIcon className="w-3.5 h-3.5" /> Healthy
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900/40 text-red-400 border border-red-800">
-      <ExclamationCircleIcon className="w-3.5 h-3.5" /> Issues Detected
-    </span>
+  return (
+    <StatusBadge variant={healthy ? 'success' : 'error'}>
+      {healthy
+        ? <><CheckCircleIcon className="w-3.5 h-3.5" /> Healthy</>
+        : <><ExclamationCircleIcon className="w-3.5 h-3.5" /> Issues Detected</>
+      }
+    </StatusBadge>
   )
 }
 

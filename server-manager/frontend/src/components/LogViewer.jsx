@@ -32,16 +32,16 @@ const LEVEL_LABELS = {
 }
 
 const LEVEL_COLORS = {
-  error: 'text-red-400',
-  warn: 'text-yellow-400',
+  error: 'text-immich-error',
+  warn: 'text-immich-warning',
   info: 'text-gray-300',
   debug: 'text-gray-500',
   untagged: 'text-orange-400',
 }
 
 const FILTER_ACTIVE_CLASSES = {
-  error: 'text-red-400 border-red-400 bg-red-400/10',
-  warn: 'text-yellow-400 border-yellow-400 bg-yellow-400/10',
+  error: 'text-immich-error border-immich-error bg-immich-error/10',
+  warn: 'text-immich-warning border-immich-warning bg-immich-warning/10',
   info: 'text-gray-300 border-gray-300 bg-gray-300/10',
   debug: 'text-gray-500 border-gray-500 bg-gray-500/10',
   untagged: 'text-orange-400 border-orange-400 bg-orange-400/10',
@@ -55,12 +55,20 @@ export default function LogViewer() {
   const [activeFilters, setActiveFilters] = useState(new Set())
   const outputRef = useRef(null)
   const eventSourceRef = useRef(null)
+  const pendingLinesRef = useRef([])
+  const flushRafRef = useRef(null)
+  const scrollRafRef = useRef(null)
 
   const stopStream = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
       eventSourceRef.current = null
     }
+    if (flushRafRef.current != null) {
+      cancelAnimationFrame(flushRafRef.current)
+      flushRafRef.current = null
+    }
+    pendingLinesRef.current = []
   }, [])
 
   const loadSnapshot = useCallback(async (service) => {
@@ -77,9 +85,18 @@ export default function LogViewer() {
     }
   }, [])
 
+  const flushPendingLines = useCallback(() => {
+    flushRafRef.current = null
+    if (pendingLinesRef.current.length === 0) return
+    const batch = pendingLinesRef.current
+    pendingLinesRef.current = []
+    setLogLines((prev) => [...prev, ...batch])
+  }, [])
+
   const startStream = useCallback((service) => {
     stopStream()
     setLogLines([])
+    pendingLinesRef.current = []
     const es = new EventSource(`/api/logs/${encodeURIComponent(service)}/stream`)
     es.onmessage = (e) => {
       let entry
@@ -88,14 +105,17 @@ export default function LogViewer() {
       } catch {
         entry = { level: 'untagged', text: e.data }
       }
-      setLogLines((prev) => [...prev, entry])
+      pendingLinesRef.current.push(entry)
+      if (flushRafRef.current == null) {
+        flushRafRef.current = requestAnimationFrame(flushPendingLines)
+      }
     }
     es.onerror = () => {
       stopStream()
       setIsLive(false)
     }
     eventSourceRef.current = es
-  }, [stopStream])
+  }, [stopStream, flushPendingLines])
 
   useEffect(() => {
     stopStream()
@@ -119,10 +139,16 @@ export default function LogViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive])
 
-  // Auto-scroll on every new line (regardless of filter)
+  // Auto-scroll on new lines, batched via rAF to avoid layout thrashing
   useEffect(() => {
     if (isLive && outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight
+      if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current)
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null
+        if (outputRef.current) {
+          outputRef.current.scrollTop = outputRef.current.scrollHeight
+        }
+      })
     }
   }, [logLines, isLive])
 
@@ -149,10 +175,10 @@ export default function LogViewer() {
       <div className="flex flex-wrap gap-1 mb-3 border-b border-immich-border pb-3">
         {SERVICES.map((svc) => (
           <button
+            type="button"
             key={svc}
-            aria-label={svc}
             onClick={() => setSelectedService(svc)}
-            className={`px-3 py-1.5 text-xs font-mono rounded-lg transition-colors duration-150 border-b-2 ${
+            className={`px-3 py-1.5 text-xs font-mono rounded-lg transition-colors duration-150 border-b-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary ${
               selectedService === svc
                 ? 'text-immich-primary border-immich-primary bg-immich-primary/10'
                 : 'text-immich-muted border-transparent hover:text-immich-text hover:bg-immich-border/50'
@@ -166,9 +192,10 @@ export default function LogViewer() {
       {/* Controls */}
       <div className="flex items-center gap-4 mb-3">
         <button
+          type="button"
           onClick={() => !isLive && loadSnapshot(selectedService)}
           disabled={isLive}
-          className="px-3 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors duration-150"
+          className="px-3 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
         >
           Refresh
         </button>
@@ -181,7 +208,7 @@ export default function LogViewer() {
           />
           <span className="flex items-center gap-1.5">
             {isLive && (
-              <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="inline-block w-2 h-2 rounded-full bg-immich-success animate-pulse" />
             )}
             Live
           </span>
@@ -191,8 +218,9 @@ export default function LogViewer() {
       {/* Level filter bar */}
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <button
+          type="button"
           onClick={() => setActiveFilters(new Set())}
-          className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors duration-150 ${
+          className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary ${
             activeFilters.size === 0
               ? 'text-immich-primary border-immich-primary bg-immich-primary/10'
               : 'text-immich-muted border-immich-border hover:text-immich-text hover:bg-immich-border/50'
@@ -202,9 +230,10 @@ export default function LogViewer() {
         </button>
         {LEVELS.map((level) => (
           <button
+            type="button"
             key={level}
             onClick={() => toggleFilter(level)}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors duration-150 ${
+            className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary ${
               activeFilters.has(level)
                 ? FILTER_ACTIVE_CLASSES[level]
                 : 'text-immich-muted border-immich-border hover:text-immich-text hover:bg-immich-border/50'
@@ -223,7 +252,9 @@ export default function LogViewer() {
       {/* Output */}
       <div
         ref={outputRef}
-        className="bg-[#080810] rounded-xl p-3 text-xs font-mono h-96 overflow-y-auto"
+        role="log"
+        aria-label="Service log output"
+        className="bg-[#080810] rounded-xl p-3 text-xs font-mono h-64 sm:h-80 md:h-96 lg:h-[32rem] overflow-y-auto"
       >
         {loading ? (
           <span className="text-gray-300">Loading…</span>

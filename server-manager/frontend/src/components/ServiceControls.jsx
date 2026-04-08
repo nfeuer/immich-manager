@@ -61,9 +61,11 @@ export default function ServiceControls() {
           <div key={svc} className="flex items-center justify-between py-1.5 border-b border-immich-border last:border-0">
             <span className="text-sm font-mono text-immich-text">{svc}</span>
             <button
+              type="button"
               onClick={() => { restartService(svc) }}
               disabled={(states[svc] ?? 'idle') === 'loading'}
-              className="px-3 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors duration-150 min-w-[64px] flex items-center justify-center"
+              aria-label={`Restart ${svc}`}
+              className="px-3 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors duration-150 min-w-[64px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
             >
               <ButtonContent state={states[svc] ?? 'idle'} />
             </button>
@@ -72,8 +74,9 @@ export default function ServiceControls() {
       </div>
       <div className="mt-4 flex justify-end">
         <button
+          type="button"
           onClick={() => { restartAll() }}
-          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors duration-150"
+          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
         >
           Restart All Immich Services
         </button>

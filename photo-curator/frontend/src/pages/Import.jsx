@@ -155,9 +155,10 @@ export default function Import() {
         <div className="space-y-3">
           {SOURCES.filter(s => !s.adminOnly || isAdmin).map(s => (
             <button
+              type="button"
               key={s.id}
               onClick={() => { setSource(s.id); setStep(1) }}
-              className="w-full text-left p-4 rounded-xl border border-immich-border bg-immich-surface hover:border-immich-primary transition-colors"
+              className="w-full text-left p-4 rounded-xl border border-immich-border bg-immich-surface hover:border-immich-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
             >
               <p className="text-immich-text font-medium">{s.label}</p>
               <p className="text-immich-muted text-sm mt-0.5">{s.desc}</p>
@@ -170,8 +171,9 @@ export default function Import() {
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
             <button
+              type="button"
               onClick={() => setStep(0)}
-              className="text-immich-primary text-sm hover:underline"
+              className="text-immich-primary text-sm hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded"
             >
               ← Back
             </button>
@@ -235,14 +237,15 @@ export default function Import() {
           )}
 
           {uploadMutation.error && (
-            <p className="text-red-400 text-sm">{uploadMutation.error.message}</p>
+            <p className="text-immich-error text-sm">{uploadMutation.error.message}</p>
           )}
 
           <button
+            type="button"
             data-testid="btn-start-import"
             disabled={!files || files.length === 0 || uploadMutation.isPending}
             onClick={() => uploadMutation.mutate()}
-            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40"
+            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             Start Import
           </button>
@@ -252,7 +255,7 @@ export default function Import() {
       {step === 1 && source === 'server_path' && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
-            <button onClick={() => setStep(0)} className="text-immich-primary text-sm hover:underline">
+            <button type="button" onClick={() => setStep(0)} className="text-immich-primary text-sm hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">
               ← Back
             </button>
             <span className="text-immich-muted text-sm">Server Path Import</span>
@@ -265,23 +268,27 @@ export default function Import() {
                 The photos must already be on the server (e.g. copied via rsync). The server will read
                 directly from this path — nothing is re-uploaded through the browser.
               </p>
+              <label htmlFor="server-path-input" className="sr-only">Server directory path</label>
               <input
+                id="server-path-input"
                 data-testid="server-path-input"
                 type="text"
                 placeholder="/opt/photos-import"
                 value={serverPath}
                 onChange={(e) => setServerPath(e.target.value)}
-                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm font-mono placeholder:text-immich-muted focus:outline-none focus:border-immich-primary"
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm font-mono placeholder:text-immich-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
               />
             </div>
 
             <div>
               <p className="text-immich-text text-sm font-medium mb-1">Photo source format</p>
+              <label htmlFor="server-path-source-type" className="sr-only">Photo source format</label>
               <select
+                id="server-path-source-type"
                 data-testid="server-path-source-type"
                 value={serverPathSourceType}
                 onChange={(e) => setServerPathSourceType(e.target.value)}
-                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus:border-immich-primary"
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
               >
                 <option value="folder">Plain folder (any photos, no special format)</option>
                 <option value="google">Google Takeout export</option>
@@ -315,14 +322,15 @@ export default function Import() {
           </div>
 
           {serverPathMutation.error && (
-            <p className="text-red-400 text-sm">{serverPathMutation.error.message}</p>
+            <p className="text-immich-error text-sm">{serverPathMutation.error.message}</p>
           )}
 
           <button
+            type="button"
             data-testid="btn-start-import"
             disabled={!serverPath.trim() || serverPathMutation.isPending}
             onClick={() => serverPathMutation.mutate()}
-            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40"
+            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             {serverPathMutation.isPending ? 'Starting…' : 'Start Import'}
           </button>
@@ -376,21 +384,21 @@ export default function Import() {
                 </div>
 
                 {/* Stats grid */}
-                <div className="grid grid-cols-5 gap-3 text-center">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-center">
                   <div>
-                    <p data-testid="stat-uploaded" className="text-xl font-bold text-green-400">{job.uploaded ?? 0}</p>
+                    <p data-testid="stat-uploaded" className="text-xl font-bold text-immich-success">{job.uploaded ?? 0}</p>
                     <p className="text-xs text-immich-muted">Uploaded</p>
                   </div>
                   <div>
-                    <p data-testid="stat-albums" className="text-xl font-bold text-blue-400">{job.albums_created ?? 0}</p>
+                    <p data-testid="stat-albums" className="text-xl font-bold text-immich-info">{job.albums_created ?? 0}</p>
                     <p className="text-xs text-immich-muted">Albums</p>
                   </div>
                   <div>
-                    <p data-testid="stat-duplicates" className="text-xl font-bold text-yellow-400">{job.duplicates ?? 0}</p>
+                    <p data-testid="stat-duplicates" className="text-xl font-bold text-immich-warning">{job.duplicates ?? 0}</p>
                     <p className="text-xs text-immich-muted">Duplicates</p>
                   </div>
                   <div>
-                    <p data-testid="stat-errors" className="text-xl font-bold text-red-400">{job.errors ?? 0}</p>
+                    <p data-testid="stat-errors" className="text-xl font-bold text-immich-error">{job.errors ?? 0}</p>
                     <p className="text-xs text-immich-muted">Errors</p>
                   </div>
                   <div>
@@ -403,7 +411,7 @@ export default function Import() {
 
             {/* Error banner */}
             {job?.error_message && (
-              <div data-testid="error-banner" className="p-3 bg-red-900/20 border border-red-700 rounded-lg text-red-400 text-sm">
+              <div data-testid="error-banner" className="p-3 bg-immich-error-muted border border-immich-error-border rounded-lg text-immich-error text-sm">
                 {job.error_message}
               </div>
             )}
@@ -412,18 +420,20 @@ export default function Import() {
             <div className="flex gap-2">
               {isJobRunning && (
                 <button
+                  type="button"
                   data-testid="btn-cancel"
                   onClick={cancelJob}
-                  className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700"
+                  className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                 >
                   Cancel
                 </button>
               )}
               {TERMINAL.includes(job?.status) && (
                 <button
+                  type="button"
                   data-testid="btn-new-import"
                   onClick={resetWizard}
-                  className="px-3 py-1.5 bg-immich-surface text-immich-text text-sm rounded-lg border border-immich-border hover:bg-immich-border/40"
+                  className="px-3 py-1.5 bg-immich-surface text-immich-text text-sm rounded-lg border border-immich-border hover:bg-immich-border/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
                 >
                   New Import
                 </button>
@@ -440,7 +450,7 @@ export default function Import() {
           <p className="text-immich-muted text-sm">Loading…</p>
         )}
         {historyQuery.isError && (
-          <p className="text-red-400 text-sm">Failed to load import history.</p>
+          <p className="text-immich-error text-sm">Failed to load import history.</p>
         )}
         {!historyQuery.isLoading && !historyQuery.isError && (
           <div data-testid="history-list" className="space-y-2">
@@ -462,9 +472,9 @@ export default function Import() {
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-green-400">{j.uploaded ?? 0} uploaded</span>
-                  <span className="text-yellow-400">{j.duplicates ?? 0} dupes</span>
-                  <span className="text-red-400">{j.errors ?? 0} errors</span>
+                  <span className="text-immich-success">{j.uploaded ?? 0} uploaded</span>
+                  <span className="text-immich-warning">{j.duplicates ?? 0} dupes</span>
+                  <span className="text-immich-error">{j.errors ?? 0} errors</span>
                   <span className="text-immich-muted">{j.status}</span>
                 </div>
               </div>

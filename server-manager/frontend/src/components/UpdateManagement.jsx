@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { ArrowPathIcon } from '@heroicons/react/24/outline'
+import StatusBadge from './StatusBadge.jsx'
 
 export default function UpdateManagement() {
   const [data, setData] = useState(null)
@@ -84,7 +85,7 @@ export default function UpdateManagement() {
     return (
       <div className="bg-immich-surface border border-immich-border rounded-2xl p-5 mb-6">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-immich-muted mb-4">Updates</h2>
-        <p className="text-red-400 text-sm">Failed to load update status.</p>
+        <p className="text-immich-error text-sm">Failed to load update status.</p>
       </div>
     )
   }
@@ -112,30 +113,26 @@ export default function UpdateManagement() {
         )}
         {!data.immich_reachable ? (
           <>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900/40 text-red-400 border border-red-800">
-              Immich unreachable
-            </span>
+            <StatusBadge variant="error">Immich unreachable</StatusBadge>
             <button
+              type="button"
               onClick={() => { applyUpdate() }}
               disabled={updating}
-              className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150"
+              className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               Update anyway
             </button>
           </>
         ) : upToDate ? (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900/40 text-green-400 border border-green-800">
-            Up to date ✓
-          </span>
+          <StatusBadge variant="success">Up to date ✓</StatusBadge>
         ) : (
           <>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900/40 text-blue-400 border border-blue-800">
-              Update Available
-            </span>
+            <StatusBadge variant="info">Update Available</StatusBadge>
             <button
+              type="button"
               onClick={() => { applyUpdate() }}
               disabled={updating}
-              className="px-4 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150"
+              className="px-4 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Apply Update
             </button>
@@ -146,12 +143,12 @@ export default function UpdateManagement() {
       {updating && progressLines.length > 0 && (
         <pre
           ref={progressRef}
-          className="bg-[#080810] text-gray-300 rounded-xl p-3 text-xs font-mono max-h-40 overflow-y-auto whitespace-pre-wrap mb-4"
+          className="bg-[#080810] text-gray-300 rounded-xl p-3 text-xs font-mono max-h-32 sm:max-h-40 md:max-h-52 overflow-y-auto whitespace-pre-wrap mb-4"
         >
           {progressLines.map((l, i) => (
             <span key={i} className={
-              l.step === 'done' ? 'text-green-400' :
-              ['rolled_back', 'error'].includes(l.step) ? 'text-red-400' : ''
+              l.step === 'done' ? 'text-immich-success' :
+              ['rolled_back', 'error'].includes(l.step) ? 'text-immich-error' : ''
             }>
               {l.message}{'\n'}
             </span>
@@ -163,6 +160,13 @@ export default function UpdateManagement() {
         <div className="border-t border-immich-border pt-4">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-immich-muted mb-3">History</h3>
           <table className="w-full text-sm">
+            <thead className="sr-only">
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Version</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
             <tbody>
               {data.history.slice(0, 5).map((h, i) => (
                 <tr key={i} className="border-b border-immich-border last:border-0">
@@ -172,7 +176,7 @@ export default function UpdateManagement() {
                   <td className="py-1.5 pr-4 font-mono text-xs text-immich-text">
                     v{h.from_version ?? '?'} → v{h.to_version ?? '?'}
                   </td>
-                  <td className={`py-1.5 text-xs font-medium ${h.status === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+                  <td className={`py-1.5 text-xs font-medium ${h.status === 'success' ? 'text-immich-success' : 'text-immich-error'}`}>
                     {h.status === 'success' ? '✓ success' : `✗ ${h.status}`}
                   </td>
                 </tr>

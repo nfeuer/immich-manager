@@ -5,10 +5,12 @@ export default function PhotoGrid({ photos, selected, onToggle }) {
         const isSelected = selected.has(photo.asset_id)
         return (
           <button
+            type="button"
             key={photo.asset_id}
             data-testid={`photo-${photo.asset_id}`}
             onClick={() => onToggle(photo.asset_id)}
-            className={`relative aspect-square rounded-lg overflow-hidden ring-2 transition-all ${
+            aria-pressed={isSelected}
+            className={`relative aspect-square rounded-lg overflow-hidden ring-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary ${
               isSelected ? 'ring-immich-primary' : 'ring-transparent opacity-70 hover:opacity-100'
             }`}
           >

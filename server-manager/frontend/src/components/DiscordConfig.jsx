@@ -23,16 +23,16 @@ function Toggle({ enabled, onChange, label }) {
   )
 }
 
-function Field({ label, children }) {
+function Field({ label, htmlFor, children }) {
   return (
     <div className="space-y-1">
-      <label className="block text-xs font-medium text-immich-muted">{label}</label>
+      <label htmlFor={htmlFor} className="block text-xs font-medium text-immich-muted">{label}</label>
       {children}
     </div>
   )
 }
 
-const inputClass = 'w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-sm text-immich-text placeholder-immich-muted/50 focus:border-blue-500 focus:outline-none transition-colors'
+const inputClass = 'w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-sm text-immich-text placeholder-immich-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus:border-blue-500 transition-colors'
 
 export default function DiscordConfig() {
   const { data, isLoading, isError } = useDiscordConfig()
@@ -111,7 +111,7 @@ export default function DiscordConfig() {
         <h2 className="text-xs font-semibold uppercase tracking-wider text-immich-muted mb-4 flex items-center gap-1.5">
           <ChatBubbleLeftRightIcon className="w-3.5 h-3.5" /> Discord Configuration
         </h2>
-        <p className="text-red-400 text-sm">Failed to load Discord configuration.</p>
+        <p className="text-immich-error text-sm">Failed to load Discord configuration.</p>
       </div>
     )
   }
@@ -130,8 +130,9 @@ export default function DiscordConfig() {
             <Toggle enabled={discord.enabled} onChange={(v) => updateDiscord({ enabled: v })} label="Enabled" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Webhook URL">
+            <Field label="Webhook URL" htmlFor="discord-webhook-url">
               <input
+                id="discord-webhook-url"
                 type="url"
                 value={discord.webhook_url}
                 onChange={(e) => updateDiscord({ webhook_url: e.target.value })}
@@ -139,8 +140,9 @@ export default function DiscordConfig() {
                 className={inputClass}
               />
             </Field>
-            <Field label="Bot Display Name">
+            <Field label="Bot Display Name" htmlFor="discord-bot-name">
               <input
+                id="discord-bot-name"
                 type="text"
                 value={discord.bot_name}
                 onChange={(e) => updateDiscord({ bot_name: e.target.value })}
@@ -148,8 +150,9 @@ export default function DiscordConfig() {
                 className={inputClass}
               />
             </Field>
-            <Field label="Server Name (optional label)">
+            <Field label="Server Name (optional label)" htmlFor="discord-server-name">
               <input
+                id="discord-server-name"
                 type="text"
                 value={discord.server_name}
                 onChange={(e) => updateDiscord({ server_name: e.target.value })}
@@ -159,9 +162,10 @@ export default function DiscordConfig() {
             </Field>
             <div className="flex items-end">
               <button
+                type="button"
                 onClick={() => testAlertMut.mutate()}
                 disabled={!discord.enabled || !discord.webhook_url || testAlertMut.isPending}
-                className="px-4 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150"
+                className="px-4 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 {testAlertMut.isPending ? 'Sending...' : testAlertMut.isSuccess ? 'Sent!' : testAlertMut.isError ? 'Failed' : 'Test Alert'}
               </button>
@@ -178,8 +182,9 @@ export default function DiscordConfig() {
             <Toggle enabled={digest.enabled} onChange={(v) => updateDigest({ enabled: v })} label="Enabled" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Schedule (cron expression)">
+            <Field label="Schedule (cron expression)" htmlFor="digest-schedule">
               <input
+                id="digest-schedule"
                 type="text"
                 value={digest.schedule}
                 onChange={(e) => updateDigest({ schedule: e.target.value })}
@@ -190,9 +195,10 @@ export default function DiscordConfig() {
             </Field>
             <div className="flex items-end">
               <button
+                type="button"
                 onClick={() => testDigestMut.mutate()}
                 disabled={!discord.enabled || !discord.webhook_url || testDigestMut.isPending}
-                className="px-4 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150"
+                className="px-4 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 {testDigestMut.isPending ? 'Sending...' : testDigestMut.isSuccess ? 'Sent!' : testDigestMut.isError ? 'Failed' : 'Test Digest'}
               </button>
@@ -226,16 +232,18 @@ export default function DiscordConfig() {
           </div>
           <p className="text-xs text-immich-muted mb-3">Non-critical alerts are suppressed during quiet hours. Critical alerts always send.</p>
           <div className="grid grid-cols-2 gap-4 max-w-xs">
-            <Field label="Start">
+            <Field label="Start" htmlFor="quiet-hours-start">
               <input
+                id="quiet-hours-start"
                 type="time"
                 value={quietHours.start}
                 onChange={(e) => updateQuietHours({ start: e.target.value })}
                 className={inputClass}
               />
             </Field>
-            <Field label="End">
+            <Field label="End" htmlFor="quiet-hours-end">
               <input
+                id="quiet-hours-end"
                 type="time"
                 value={quietHours.end}
                 onChange={(e) => updateQuietHours({ end: e.target.value })}
@@ -249,14 +257,15 @@ export default function DiscordConfig() {
       {/* ── Save Bar ── */}
       <div className="mt-6 flex items-center gap-3">
         <button
+          type="button"
           onClick={handleSave}
           disabled={!dirty || updateMut.isPending}
-          className="px-5 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-semibold transition-colors duration-150"
+          className="px-5 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-semibold transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           {updateMut.isPending ? 'Saving...' : 'Save Changes'}
         </button>
         {saveMsg && (
-          <span className={`text-sm ${saveMsg.type === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+          <span className={`text-sm ${saveMsg.type === 'ok' ? 'text-immich-success' : 'text-immich-error'}`}>
             {saveMsg.text}
           </span>
         )}

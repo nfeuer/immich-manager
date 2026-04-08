@@ -1,16 +1,14 @@
 import { ArchiveBoxIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import { useBackups } from '../hooks/useDashboard.js'
+import StatusBadge from './StatusBadge.jsx'
 
-function StatusBadge({ status }) {
+function BackupStatusBadge({ status }) {
   const ok = status === 'success'
-  return ok ? (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-900/40 text-green-400 border border-green-800">
-      <CheckCircleIcon className="w-3 h-3" /> {status}
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-900/40 text-red-400 border border-red-800">
-      <XCircleIcon className="w-3 h-3" /> {status}
-    </span>
+  return (
+    <StatusBadge variant={ok ? 'success' : 'error'}>
+      {ok ? <CheckCircleIcon className="w-3 h-3" /> : <XCircleIcon className="w-3 h-3" />}
+      {status}
+    </StatusBadge>
   )
 }
 
@@ -46,14 +44,15 @@ export default function BackupsCard() {
               <span className="text-xs text-immich-muted">
                 {new Date(b.timestamp).toLocaleDateString()}
               </span>
-              <StatusBadge status={b.status} />
+              <BackupStatusBadge status={b.status} />
             </div>
           ))}
         </div>
       )}
       <button
+        type="button"
         onClick={() => { triggerBackup() }}
-        className="mt-auto w-full px-4 py-2 bg-immich-primary hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors duration-150 flex items-center justify-center gap-2"
+        className="mt-auto w-full px-4 py-2 bg-immich-primary hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors duration-150 flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
       >
         <ArchiveBoxIcon className="w-4 h-4" />
         Backup Now

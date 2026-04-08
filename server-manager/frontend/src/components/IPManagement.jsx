@@ -39,15 +39,15 @@ function TrustedTab() {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-immich-muted text-left border-b border-immich-border">
-            <th className="pb-2 pr-4">IP Address</th>
-            <th className="pb-2 pr-4">Label</th>
-            <th className="pb-2 pr-4">User</th>
-            <th className="pb-2 pr-4">Access</th>
-            <th className="pb-2 pr-4">Duration</th>
-            <th className="pb-2 pr-4">Expires</th>
-            <th className="pb-2 pr-4">Last Seen</th>
-            <th className="pb-2 pr-4">7d Conns</th>
-            <th className="pb-2">Actions</th>
+            <th scope="col" className="pb-2 pr-4">IP Address</th>
+            <th scope="col" className="pb-2 pr-4">Label</th>
+            <th scope="col" className="pb-2 pr-4">User</th>
+            <th scope="col" className="pb-2 pr-4">Access</th>
+            <th scope="col" className="pb-2 pr-4">Duration</th>
+            <th scope="col" className="pb-2 pr-4">Expires</th>
+            <th scope="col" className="pb-2 pr-4">Last Seen</th>
+            <th scope="col" className="pb-2 pr-4">7d Conns</th>
+            <th scope="col" className="pb-2">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -66,10 +66,10 @@ function TrustedTab() {
               <td className="py-2 pr-4 text-xs">{timeAgo(ip.last_seen)}</td>
               <td className="py-2 pr-4 text-xs">{ip.connections_7d ?? 0}</td>
               <td className="py-2 flex gap-2">
-                <button onClick={() => { setEditingIp(ip.ip_address); setEditLabel(ip.label || ''); setEditDuration(ip.trust_duration || '24h') }}
-                  className="text-xs text-blue-400 hover:text-blue-300">Edit</button>
-                <button onClick={() => setRevokeIp(ip.ip_address)}
-                  className="text-xs text-red-400 hover:text-red-300">Revoke</button>
+                <button type="button" onClick={() => { setEditingIp(ip.ip_address); setEditLabel(ip.label || ''); setEditDuration(ip.trust_duration || '24h') }}
+                  className="text-xs text-blue-400 hover:text-blue-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Edit</button>
+                <button type="button" onClick={() => setRevokeIp(ip.ip_address)}
+                  className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">Revoke</button>
               </td>
             </tr>
           ))}
@@ -84,36 +84,37 @@ function TrustedTab() {
           <h4 className="text-sm font-medium mb-2">Edit {editingIp}</h4>
           <div className="flex gap-3 items-end">
             <div>
-              <label className="text-xs text-immich-muted block mb-1">Label</label>
-              <input value={editLabel} onChange={(e) => setEditLabel(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text" />
+              <label htmlFor="edit-label" className="text-xs text-immich-muted block mb-1">Label</label>
+              <input id="edit-label" value={editLabel} onChange={(e) => setEditLabel(e.target.value)}
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400" />
             </div>
             <div>
-              <label className="text-xs text-immich-muted block mb-1">Duration</label>
-              <select value={editDuration} onChange={(e) => setEditDuration(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text">
+              <label htmlFor="edit-duration" className="text-xs text-immich-muted block mb-1">Duration</label>
+              <select id="edit-duration" value={editDuration} onChange={(e) => setEditDuration(e.target.value)}
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
                 {DURATION_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
-            <button onClick={() => { updateMut.mutate({ ip: editingIp, label: editLabel, trust_duration: editDuration }); setEditingIp(null) }}
-              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">Save</button>
-            <button onClick={() => setEditingIp(null)}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm">Cancel</button>
+            <button type="button" onClick={() => { updateMut.mutate({ ip: editingIp, label: editLabel, trust_duration: editDuration }); setEditingIp(null) }}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">Save</button>
+            <button type="button" onClick={() => setEditingIp(null)}
+              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Cancel</button>
           </div>
         </div>
       )}
 
       {revokeIp && (
-        <div className="mt-4 p-4 bg-immich-bg border border-red-800/50 rounded-lg">
-          <h4 className="text-sm font-medium text-red-400 mb-2">Revoke {revokeIp}</h4>
-          <input value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)}
+        <div className="mt-4 p-4 bg-immich-bg border border-immich-error-border/50 rounded-lg">
+          <h4 className="text-sm font-medium text-immich-error mb-2">Revoke {revokeIp}</h4>
+          <label htmlFor="revoke-reason" className="sr-only">Reason for revoking</label>
+          <input id="revoke-reason" value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)}
             placeholder="Reason (optional)"
-            className="w-full px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text mb-2" />
+            className="w-full px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400" />
           <div className="flex gap-2">
-            <button onClick={() => { revokeMut.mutate({ ip_address: revokeIp, reason: revokeReason }); setRevokeIp(null); setRevokeReason('') }}
-              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded">Confirm Revoke</button>
-            <button onClick={() => { setRevokeIp(null); setRevokeReason('') }}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm">Cancel</button>
+            <button type="button" onClick={() => { revokeMut.mutate({ ip_address: revokeIp, reason: revokeReason }); setRevokeIp(null); setRevokeReason('') }}
+              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">Confirm Revoke</button>
+            <button type="button" onClick={() => { setRevokeIp(null); setRevokeReason('') }}
+              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Cancel</button>
           </div>
         </div>
       )}
@@ -137,10 +138,10 @@ function PendingTab() {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-immich-muted text-left border-b border-immich-border">
-            <th className="pb-2 pr-4">IP Address</th>
-            <th className="pb-2 pr-4">Source</th>
-            <th className="pb-2 pr-4">First Seen</th>
-            <th className="pb-2">Actions</th>
+            <th scope="col" className="pb-2 pr-4">IP Address</th>
+            <th scope="col" className="pb-2 pr-4">Source</th>
+            <th scope="col" className="pb-2 pr-4">First Seen</th>
+            <th scope="col" className="pb-2">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -150,10 +151,10 @@ function PendingTab() {
               <td className="py-2 pr-4 text-xs">{ip.source}</td>
               <td className="py-2 pr-4 text-xs">{timeAgo(ip.created_at)}</td>
               <td className="py-2 flex gap-2">
-                <button onClick={() => setApproveIp(ip.ip_address)}
-                  className="text-xs text-green-400 hover:text-green-300">Approve</button>
-                <button onClick={() => revokeMut.mutate({ ip_address: ip.ip_address })}
-                  className="text-xs text-red-400 hover:text-red-300">Blacklist</button>
+                <button type="button" onClick={() => setApproveIp(ip.ip_address)}
+                  className="text-xs text-green-400 hover:text-green-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400 rounded">Approve</button>
+                <button type="button" onClick={() => revokeMut.mutate({ ip_address: ip.ip_address })}
+                  className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">Blacklist</button>
               </td>
             </tr>
           ))}
@@ -164,30 +165,30 @@ function PendingTab() {
       </table>
 
       {approveIp && (
-        <div className="mt-4 p-4 bg-immich-bg border border-green-800/50 rounded-lg">
-          <h4 className="text-sm font-medium text-green-400 mb-2">Approve {approveIp}</h4>
+        <div className="mt-4 p-4 bg-immich-bg border border-immich-success-border/50 rounded-lg">
+          <h4 className="text-sm font-medium text-immich-success mb-2">Approve {approveIp}</h4>
           <div className="flex gap-3 items-end">
             <div>
-              <label className="text-xs text-immich-muted block mb-1">Access Level</label>
-              <select value={approveLevel} onChange={(e) => setApproveLevel(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text">
+              <label htmlFor="approve-level" className="text-xs text-immich-muted block mb-1">Access Level</label>
+              <select id="approve-level" value={approveLevel} onChange={(e) => setApproveLevel(e.target.value)}
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400">
                 <option value="user">User (Photo Curator only)</option>
                 <option value="admin">Admin (All services)</option>
               </select>
             </div>
             <div>
-              <label className="text-xs text-immich-muted block mb-1">Duration</label>
-              <select value={approveDuration} onChange={(e) => setApproveDuration(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text">
+              <label htmlFor="approve-duration" className="text-xs text-immich-muted block mb-1">Duration</label>
+              <select id="approve-duration" value={approveDuration} onChange={(e) => setApproveDuration(e.target.value)}
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400">
                 {DURATION_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
             <button onClick={() => {
               approveMut.mutate({ ip_address: approveIp, access_level: approveLevel, trust_duration: approveDuration })
               setApproveIp(null)
-            }} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded">Confirm</button>
-            <button onClick={() => setApproveIp(null)}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm">Cancel</button>
+            }} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400">Confirm</button>
+            <button type="button" onClick={() => setApproveIp(null)}
+              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Cancel</button>
           </div>
         </div>
       )}
@@ -208,12 +209,12 @@ function BlacklistedTab() {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-immich-muted text-left border-b border-immich-border">
-            <th className="pb-2 pr-4">IP Address</th>
-            <th className="pb-2 pr-4">Original User</th>
-            <th className="pb-2 pr-4">Date Blacklisted</th>
-            <th className="pb-2 pr-4">Blacklisted By</th>
-            <th className="pb-2 pr-4">Reason</th>
-            <th className="pb-2">Actions</th>
+            <th scope="col" className="pb-2 pr-4">IP Address</th>
+            <th scope="col" className="pb-2 pr-4">Original User</th>
+            <th scope="col" className="pb-2 pr-4">Date Blacklisted</th>
+            <th scope="col" className="pb-2 pr-4">Blacklisted By</th>
+            <th scope="col" className="pb-2 pr-4">Reason</th>
+            <th scope="col" className="pb-2">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -225,10 +226,10 @@ function BlacklistedTab() {
               <td className="py-2 pr-4 text-xs">{ip.revoked_by || '\u2014'}</td>
               <td className="py-2 pr-4 text-xs">{ip.revoke_reason || '\u2014'}</td>
               <td className="py-2 flex gap-2">
-                <button onClick={() => unblockMut.mutate({ ip_address: ip.ip_address })}
-                  className="text-xs text-yellow-400 hover:text-yellow-300">Unblock</button>
-                <button onClick={() => deleteMut.mutate(ip.ip_address)}
-                  className="text-xs text-red-400 hover:text-red-300">Delete</button>
+                <button type="button" onClick={() => unblockMut.mutate({ ip_address: ip.ip_address })}
+                  className="text-xs text-yellow-400 hover:text-yellow-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 rounded">Unblock</button>
+                <button type="button" onClick={() => deleteMut.mutate(ip.ip_address)}
+                  className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">Delete</button>
               </td>
             </tr>
           ))}
@@ -249,17 +250,20 @@ function ConnectionsTab() {
   return (
     <div>
       <div className="flex gap-3 mb-4">
-        <input placeholder="Filter by IP" onChange={(e) => setFilters(f => ({ ...f, ip: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text w-40" />
-        <select onChange={(e) => setFilters(f => ({ ...f, service: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text">
+        <label htmlFor="conn-filter-ip" className="sr-only">Filter by IP</label>
+        <input id="conn-filter-ip" placeholder="Filter by IP" onChange={(e) => setFilters(f => ({ ...f, ip: e.target.value || undefined }))}
+          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text w-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400" />
+        <label htmlFor="conn-filter-service" className="sr-only">Filter by service</label>
+        <select id="conn-filter-service" onChange={(e) => setFilters(f => ({ ...f, service: e.target.value || undefined }))}
+          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
           <option value="">All services</option>
           <option value="server-manager">server-manager</option>
           <option value="photo-curator">photo-curator</option>
           <option value="ssh">ssh</option>
         </select>
-        <select onChange={(e) => setFilters(f => ({ ...f, action: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text">
+        <label htmlFor="conn-filter-action" className="sr-only">Filter by action</label>
+        <select id="conn-filter-action" onChange={(e) => setFilters(f => ({ ...f, action: e.target.value || undefined }))}
+          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
           <option value="">All actions</option>
           <option value="allowed">allowed</option>
           <option value="challenged">challenged</option>
@@ -270,15 +274,15 @@ function ConnectionsTab() {
       {isLoading ? (
         <p className="text-immich-muted text-sm">Loading...</p>
       ) : (
-        <div className="overflow-x-auto max-h-96 overflow-y-auto">
+        <div className="overflow-x-auto max-h-64 sm:max-h-80 md:max-h-96 overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-immich-surface">
               <tr className="text-immich-muted text-left border-b border-immich-border">
-                <th className="pb-2 pr-4">Timestamp</th>
-                <th className="pb-2 pr-4">IP Address</th>
-                <th className="pb-2 pr-4">Service</th>
-                <th className="pb-2 pr-4">Action</th>
-                <th className="pb-2">User</th>
+                <th scope="col" className="pb-2 pr-4">Timestamp</th>
+                <th scope="col" className="pb-2 pr-4">IP Address</th>
+                <th scope="col" className="pb-2 pr-4">Service</th>
+                <th scope="col" className="pb-2 pr-4">Action</th>
+                <th scope="col" className="pb-2">User</th>
               </tr>
             </thead>
             <tbody>
@@ -289,9 +293,9 @@ function ConnectionsTab() {
                   <td className="py-1.5 pr-4 text-xs">{c.service}</td>
                   <td className="py-1.5 pr-4">
                     <span className={`text-xs ${
-                      c.action === 'allowed' ? 'text-green-400' :
-                      c.action === 'blocked' ? 'text-red-400' :
-                      c.action === 'challenged' ? 'text-yellow-400' :
+                      c.action === 'allowed' ? 'text-immich-success' :
+                      c.action === 'blocked' ? 'text-immich-error' :
+                      c.action === 'challenged' ? 'text-immich-warning' :
                       'text-orange-400'
                     }`}>{c.action}</span>
                   </td>
@@ -322,9 +326,10 @@ export default function IPManagement() {
       <div className="flex gap-1 mb-4 border-b border-immich-border">
         {TABS.map((tab) => (
           <button
+            type="button"
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
+            className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded-t ${
               activeTab === tab
                 ? 'text-blue-400 border-blue-400'
                 : 'text-immich-muted border-transparent hover:text-immich-text'

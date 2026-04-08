@@ -37,6 +37,6 @@ describe('SystemStatusCard', () => {
       isLoading: false,
     })
     const { container } = render(React.createElement(SystemStatusCard), { wrapper })
-    expect(container.querySelector('.bg-red-500')).toBeInTheDocument()
+    expect(container.querySelector('.bg-immich-error')).toBeInTheDocument()
   })
 })
