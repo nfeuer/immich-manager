@@ -173,35 +173,63 @@ function PendingTab() {
   const ips = data?.pending || []
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-immich-muted text-left border-b border-immich-border">
-            <th scope="col" className="pb-2 pr-4">IP Address</th>
-            <th scope="col" className="pb-2 pr-4">Source</th>
-            <th scope="col" className="pb-2 pr-4">First Seen</th>
-            <th scope="col" className="pb-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ips.map((ip) => (
-            <tr key={ip.ip_address} className="border-b border-immich-border/50">
-              <td className="py-2 pr-4 font-mono text-xs">{ip.ip_address}</td>
-              <td className="py-2 pr-4 text-xs">{ip.source}</td>
-              <td className="py-2 pr-4 text-xs">{timeAgo(ip.created_at)}</td>
-              <td className="py-2 flex gap-2">
-                <button type="button" onClick={() => setApproveIp(ip.ip_address)}
-                  className="text-xs text-immich-success hover:text-immich-success/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-success rounded">Approve</button>
-                <button type="button" onClick={() => revokeMut.mutate({ ip_address: ip.ip_address })}
-                  className="text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Blacklist</button>
-              </td>
+    <div>
+      {/* Desktop table */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-immich-muted text-left border-b border-immich-border">
+              <th scope="col" className="pb-2 pr-4">IP Address</th>
+              <th scope="col" className="pb-2 pr-4">Source</th>
+              <th scope="col" className="pb-2 pr-4">First Seen</th>
+              <th scope="col" className="pb-2">Actions</th>
             </tr>
-          ))}
-          {ips.length === 0 && (
-            <tr><td colSpan={4} className="py-4 text-center text-immich-muted">No pending IPs</td></tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {ips.map((ip) => (
+              <tr key={ip.ip_address} className="border-b border-immich-border/50">
+                <td className="py-2 pr-4 font-mono text-xs">{ip.ip_address}</td>
+                <td className="py-2 pr-4 text-xs">{ip.source}</td>
+                <td className="py-2 pr-4 text-xs">{timeAgo(ip.created_at)}</td>
+                <td className="py-2 flex gap-2">
+                  <button type="button" onClick={() => setApproveIp(ip.ip_address)}
+                    className="min-h-[44px] px-3 text-xs text-immich-success hover:text-immich-success/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-success rounded">Approve</button>
+                  <button type="button" onClick={() => revokeMut.mutate({ ip_address: ip.ip_address })}
+                    className="min-h-[44px] px-3 text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Blacklist</button>
+                </td>
+              </tr>
+            ))}
+            {ips.length === 0 && (
+              <tr><td colSpan={4} className="py-4 text-center text-immich-muted">No pending IPs</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {ips.length === 0 ? (
+          <p className="py-4 text-center text-immich-muted text-sm">No pending IPs</p>
+        ) : (
+          ips.map((ip) => (
+            <div key={ip.ip_address} className="bg-immich-bg border border-immich-border rounded-xl p-4">
+              <div className="mb-2">
+                <span className="font-mono text-sm break-all">{ip.ip_address}</span>
+              </div>
+              <dl className="space-y-1 text-xs mb-3">
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">Source</dt><dd className="text-right">{ip.source}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">First seen</dt><dd className="text-right">{timeAgo(ip.created_at)}</dd></div>
+              </dl>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setApproveIp(ip.ip_address)}
+                  className="flex-1 min-h-[44px] text-sm text-immich-success border border-immich-success/40 hover:bg-immich-success-muted rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-success">Approve</button>
+                <button type="button" onClick={() => revokeMut.mutate({ ip_address: ip.ip_address })}
+                  className="flex-1 min-h-[44px] text-sm text-immich-error border border-immich-error/40 hover:bg-immich-error-muted rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error">Blacklist</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
 
       {approveIp && (
         <div className="mt-4 p-4 bg-immich-bg border border-immich-success-border/50 rounded-lg">
@@ -244,39 +272,69 @@ function BlacklistedTab() {
   const ips = data?.revoked || []
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-immich-muted text-left border-b border-immich-border">
-            <th scope="col" className="pb-2 pr-4">IP Address</th>
-            <th scope="col" className="pb-2 pr-4">Original User</th>
-            <th scope="col" className="pb-2 pr-4">Date Blacklisted</th>
-            <th scope="col" className="pb-2 pr-4">Blacklisted By</th>
-            <th scope="col" className="pb-2 pr-4">Reason</th>
-            <th scope="col" className="pb-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ips.map((ip) => (
-            <tr key={ip.ip_address} className="border-b border-immich-border/50">
-              <td className="py-2 pr-4 font-mono text-xs">{ip.ip_address}</td>
-              <td className="py-2 pr-4 text-xs">{ip.verified_by || 'unknown'}</td>
-              <td className="py-2 pr-4 text-xs">{ip.revoked_at ? new Date(ip.revoked_at).toLocaleDateString() : '\u2014'}</td>
-              <td className="py-2 pr-4 text-xs">{ip.revoked_by || '\u2014'}</td>
-              <td className="py-2 pr-4 text-xs">{ip.revoke_reason || '\u2014'}</td>
-              <td className="py-2 flex gap-2">
-                <button type="button" onClick={() => unblockMut.mutate({ ip_address: ip.ip_address })}
-                  className="text-xs text-immich-warning hover:text-immich-warning/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-warning rounded">Unblock</button>
-                <button type="button" onClick={() => deleteMut.mutate(ip.ip_address)}
-                  className="text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Delete</button>
-              </td>
+    <div>
+      {/* Desktop table */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-immich-muted text-left border-b border-immich-border">
+              <th scope="col" className="pb-2 pr-4">IP Address</th>
+              <th scope="col" className="pb-2 pr-4">Original User</th>
+              <th scope="col" className="pb-2 pr-4">Date Blacklisted</th>
+              <th scope="col" className="pb-2 pr-4">Blacklisted By</th>
+              <th scope="col" className="pb-2 pr-4">Reason</th>
+              <th scope="col" className="pb-2">Actions</th>
             </tr>
-          ))}
-          {ips.length === 0 && (
-            <tr><td colSpan={6} className="py-4 text-center text-immich-muted">No blacklisted IPs</td></tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {ips.map((ip) => (
+              <tr key={ip.ip_address} className="border-b border-immich-border/50">
+                <td className="py-2 pr-4 font-mono text-xs">{ip.ip_address}</td>
+                <td className="py-2 pr-4 text-xs">{ip.verified_by || 'unknown'}</td>
+                <td className="py-2 pr-4 text-xs">{ip.revoked_at ? new Date(ip.revoked_at).toLocaleDateString() : '\u2014'}</td>
+                <td className="py-2 pr-4 text-xs">{ip.revoked_by || '\u2014'}</td>
+                <td className="py-2 pr-4 text-xs">{ip.revoke_reason || '\u2014'}</td>
+                <td className="py-2 flex gap-2">
+                  <button type="button" onClick={() => unblockMut.mutate({ ip_address: ip.ip_address })}
+                    className="min-h-[44px] px-3 text-xs text-immich-warning hover:text-immich-warning/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-warning rounded">Unblock</button>
+                  <button type="button" onClick={() => deleteMut.mutate(ip.ip_address)}
+                    className="min-h-[44px] px-3 text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Delete</button>
+                </td>
+              </tr>
+            ))}
+            {ips.length === 0 && (
+              <tr><td colSpan={6} className="py-4 text-center text-immich-muted">No blacklisted IPs</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {ips.length === 0 ? (
+          <p className="py-4 text-center text-immich-muted text-sm">No blacklisted IPs</p>
+        ) : (
+          ips.map((ip) => (
+            <div key={ip.ip_address} className="bg-immich-bg border border-immich-border rounded-xl p-4">
+              <div className="mb-2">
+                <span className="font-mono text-sm break-all">{ip.ip_address}</span>
+              </div>
+              <dl className="space-y-1 text-xs mb-3">
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">Original user</dt><dd className="text-right">{ip.verified_by || 'unknown'}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">Blacklisted</dt><dd className="text-right">{ip.revoked_at ? new Date(ip.revoked_at).toLocaleDateString() : '—'}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">By</dt><dd className="text-right">{ip.revoked_by || '—'}</dd></div>
+                {ip.revoke_reason && <div className="flex justify-between gap-2"><dt className="text-immich-muted">Reason</dt><dd className="text-right">{ip.revoke_reason}</dd></div>}
+              </dl>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => unblockMut.mutate({ ip_address: ip.ip_address })}
+                  className="flex-1 min-h-[44px] text-sm text-immich-warning border border-immich-warning/40 hover:bg-immich-warning-muted rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-warning">Unblock</button>
+                <button type="button" onClick={() => deleteMut.mutate(ip.ip_address)}
+                  className="flex-1 min-h-[44px] text-sm text-immich-error border border-immich-error/40 hover:bg-immich-error-muted rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error">Delete</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   )
 }

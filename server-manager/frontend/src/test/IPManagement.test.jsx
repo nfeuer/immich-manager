@@ -85,14 +85,14 @@ describe('IPManagement', () => {
   it('switches to Pending tab and shows pending IPs', () => {
     render(React.createElement(IPManagement), { wrapper })
     fireEvent.click(screen.getByRole('button', { name: 'Pending' }))
-    expect(screen.getByText('10.0.0.5')).toBeInTheDocument()
+    expect(screen.getAllByText('10.0.0.5').length).toBeGreaterThanOrEqual(1)
   })
 
   it('switches to Blacklisted tab and shows revoked IPs', () => {
     render(React.createElement(IPManagement), { wrapper })
     fireEvent.click(screen.getByRole('button', { name: 'Blacklisted' }))
-    expect(screen.getByText('172.16.0.99')).toBeInTheDocument()
-    expect(screen.getByText('Suspicious')).toBeInTheDocument()
+    expect(screen.getAllByText('172.16.0.99').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Suspicious').length).toBeGreaterThanOrEqual(1)
   })
 
   it('switches to Connections tab and shows connection logs', () => {
@@ -113,8 +113,8 @@ describe('IPManagement', () => {
   it('shows Approve and Blacklist buttons in Pending tab', () => {
     render(React.createElement(IPManagement), { wrapper })
     fireEvent.click(screen.getByRole('button', { name: 'Pending' }))
-    expect(screen.getByText('Approve')).toBeInTheDocument()
-    expect(screen.getByText('Blacklist')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Approve' }).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByRole('button', { name: 'Blacklist' }).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows empty state when no trusted IPs', () => {
