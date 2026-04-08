@@ -71,7 +71,7 @@ function ScanPanel({ scanStatus, onScanStarted }) {
         ? `Collecting hashes… ${hashed} / ${total_assets}`
         : 'Comparing hashes…'
     return (
-      <div className="bg-immich-surface border border-immich-border rounded-xl p-5">
+      <div className="bg-immich-surface border border-immich-border rounded-xl p-5" aria-live="polite" aria-atomic="false">
         <div className="flex items-center justify-between mb-3">
           <p className="text-immich-text text-sm font-medium">
             {mode === 'quick' ? 'Quick Scan' : 'Deep Scan'} running

@@ -263,6 +263,8 @@ export default function LogViewer() {
         ref={outputRef}
         role="log"
         aria-label="Service log output"
+        aria-live={isLive ? 'polite' : 'off'}
+        aria-atomic="false"
         className="bg-immich-terminal rounded-xl p-3 text-xs font-mono h-64 sm:h-80 md:h-96 lg:h-[32rem] overflow-y-auto"
       >
         {loading ? (

@@ -340,7 +340,7 @@ export default function Import() {
             )}
           </div>
 
-          <div className="p-4 bg-immich-surface rounded-xl border border-immich-border space-y-4">
+          <div className="p-4 bg-immich-surface rounded-xl border border-immich-border space-y-4" aria-live="polite" aria-atomic="false">
             {job && (
               <>
                 {/* Progress bar */}
