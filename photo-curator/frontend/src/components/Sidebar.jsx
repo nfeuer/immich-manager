@@ -7,6 +7,7 @@ import {
   ChartBarIcon,
   Cog6ToothIcon,
 } from '@heroicons/react/24/outline'
+import ImmichLogoIcon from './ImmichLogoIcon'
 
 const NAV_ITEMS = [
   { to: '/',            label: 'AI Album Curator', Icon: PhotoIcon,             key: 'curator' },
@@ -22,9 +23,7 @@ export default function Sidebar({ uncuratedCount = 0 }) {
     <aside className="hidden md:flex flex-col w-[220px] bg-immich-surface border-r border-immich-border h-screen fixed left-0 top-0">
       {/* Logo + Title */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-immich-border">
-        <div className="w-8 h-8 rounded-full bg-immich-primary flex items-center justify-center flex-shrink-0">
-          <span className="text-white text-sm font-bold">I</span>
-        </div>
+        <ImmichLogoIcon className="w-8 h-8" />
         <span className="text-immich-text font-semibold text-sm">Photo Curator</span>
       </div>
 
