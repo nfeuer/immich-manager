@@ -34,17 +34,17 @@ const LEVEL_LABELS = {
 const LEVEL_COLORS = {
   error: 'text-immich-error',
   warn: 'text-immich-warning',
-  info: 'text-gray-300',
-  debug: 'text-gray-500',
-  untagged: 'text-orange-400',
+  info: 'text-immich-log-info',
+  debug: 'text-immich-log-debug',
+  untagged: 'text-immich-log-untagged',
 }
 
 const FILTER_ACTIVE_CLASSES = {
   error: 'text-immich-error border-immich-error bg-immich-error/10',
   warn: 'text-immich-warning border-immich-warning bg-immich-warning/10',
-  info: 'text-gray-300 border-gray-300 bg-gray-300/10',
-  debug: 'text-gray-500 border-gray-500 bg-gray-500/10',
-  untagged: 'text-orange-400 border-orange-400 bg-orange-400/10',
+  info: 'text-immich-log-info border-immich-log-info bg-immich-log-info/10',
+  debug: 'text-immich-log-debug border-immich-log-debug bg-immich-log-debug/10',
+  untagged: 'text-immich-log-untagged border-immich-log-untagged bg-immich-log-untagged/10',
 }
 
 export default function LogViewer() {
@@ -195,7 +195,7 @@ export default function LogViewer() {
           type="button"
           onClick={() => !isLive && loadSnapshot(selectedService)}
           disabled={isLive}
-          className="px-3 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+          className="px-3 py-1.5 bg-immich-primary hover:bg-immich-primary-hover disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
         >
           Refresh
         </button>
@@ -254,23 +254,23 @@ export default function LogViewer() {
         ref={outputRef}
         role="log"
         aria-label="Service log output"
-        className="bg-[#080810] rounded-xl p-3 text-xs font-mono h-64 sm:h-80 md:h-96 lg:h-[32rem] overflow-y-auto"
+        className="bg-immich-terminal rounded-xl p-3 text-xs font-mono h-64 sm:h-80 md:h-96 lg:h-[32rem] overflow-y-auto"
       >
         {loading ? (
-          <span className="text-gray-300">Loading…</span>
+          <span className="text-immich-log-info">Loading…</span>
         ) : visibleLines.length > 0 ? (
           visibleLines.map(({ line, idx }) => (
             <div
               key={idx}
-              className={`whitespace-pre-wrap break-all leading-relaxed ${LEVEL_COLORS[line.level] ?? 'text-gray-300'}`}
+              className={`whitespace-pre-wrap break-all leading-relaxed ${LEVEL_COLORS[line.level] ?? 'text-immich-log-info'}`}
             >
               {line.text}
             </div>
           ))
         ) : logLines.length === 0 ? (
-          <span className="text-gray-300">Select a service to load logs.</span>
+          <span className="text-immich-log-info">Select a service to load logs.</span>
         ) : (
-          <span className="text-gray-500">No lines match the active filter.</span>
+          <span className="text-immich-log-debug">No lines match the active filter.</span>
         )}
       </div>
     </div>
