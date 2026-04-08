@@ -155,10 +155,9 @@ export default function Import() {
         <div className="space-y-3">
           {SOURCES.filter(s => !s.adminOnly || isAdmin).map(s => (
             <button
-              type="button"
               key={s.id}
               onClick={() => { setSource(s.id); setStep(1) }}
-              className="w-full text-left p-4 rounded-xl border border-immich-border bg-immich-surface hover:border-immich-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+              className="w-full text-left p-4 rounded-xl border border-immich-border bg-immich-surface hover:border-immich-primary transition-colors"
             >
               <p className="text-immich-text font-medium">{s.label}</p>
               <p className="text-immich-muted text-sm mt-0.5">{s.desc}</p>
@@ -171,9 +170,8 @@ export default function Import() {
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
             <button
-              type="button"
               onClick={() => setStep(0)}
-              className="text-immich-primary text-sm hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded"
+              className="text-immich-primary text-sm hover:underline"
             >
               ← Back
             </button>
@@ -241,11 +239,10 @@ export default function Import() {
           )}
 
           <button
-            type="button"
             data-testid="btn-start-import"
             disabled={!files || files.length === 0 || uploadMutation.isPending}
             onClick={() => uploadMutation.mutate()}
-            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             Start Import
           </button>
@@ -255,7 +252,7 @@ export default function Import() {
       {step === 1 && source === 'server_path' && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
-            <button type="button" onClick={() => setStep(0)} className="text-immich-primary text-sm hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">
+            <button onClick={() => setStep(0)} className="text-immich-primary text-sm hover:underline">
               ← Back
             </button>
             <span className="text-immich-muted text-sm">Server Path Import</span>
@@ -268,27 +265,23 @@ export default function Import() {
                 The photos must already be on the server (e.g. copied via rsync). The server will read
                 directly from this path — nothing is re-uploaded through the browser.
               </p>
-              <label htmlFor="server-path-input" className="sr-only">Server directory path</label>
               <input
-                id="server-path-input"
                 data-testid="server-path-input"
                 type="text"
                 placeholder="/opt/photos-import"
                 value={serverPath}
                 onChange={(e) => setServerPath(e.target.value)}
-                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm font-mono placeholder:text-immich-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm font-mono placeholder:text-immich-muted focus:outline-none focus:border-immich-primary"
               />
             </div>
 
             <div>
               <p className="text-immich-text text-sm font-medium mb-1">Photo source format</p>
-              <label htmlFor="server-path-source-type" className="sr-only">Photo source format</label>
               <select
-                id="server-path-source-type"
                 data-testid="server-path-source-type"
                 value={serverPathSourceType}
                 onChange={(e) => setServerPathSourceType(e.target.value)}
-                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
+                className="w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-immich-text text-sm focus:outline-none focus:border-immich-primary"
               >
                 <option value="folder">Plain folder (any photos, no special format)</option>
                 <option value="google">Google Takeout export</option>
@@ -326,11 +319,10 @@ export default function Import() {
           )}
 
           <button
-            type="button"
             data-testid="btn-start-import"
             disabled={!serverPath.trim() || serverPathMutation.isPending}
             onClick={() => serverPathMutation.mutate()}
-            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+            className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             {serverPathMutation.isPending ? 'Starting…' : 'Start Import'}
           </button>
@@ -420,20 +412,18 @@ export default function Import() {
             <div className="flex gap-2">
               {isJobRunning && (
                 <button
-                  type="button"
                   data-testid="btn-cancel"
                   onClick={cancelJob}
-                  className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                  className="px-3 py-1.5 bg-immich-error-border text-white text-sm rounded-lg hover:bg-immich-error focus-visible:ring-2 focus-visible:ring-immich-primary"
                 >
                   Cancel
                 </button>
               )}
               {TERMINAL.includes(job?.status) && (
                 <button
-                  type="button"
                   data-testid="btn-new-import"
                   onClick={resetWizard}
-                  className="px-3 py-1.5 bg-immich-surface text-immich-text text-sm rounded-lg border border-immich-border hover:bg-immich-border/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+                  className="px-3 py-1.5 bg-immich-surface text-immich-text text-sm rounded-lg border border-immich-border hover:bg-immich-border/40 focus-visible:ring-2 focus-visible:ring-immich-primary"
                 >
                   New Import
                 </button>

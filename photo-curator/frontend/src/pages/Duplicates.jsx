@@ -76,10 +76,9 @@ function ScanPanel({ scanStatus, onScanStarted }) {
             {mode === 'quick' ? 'Quick Scan' : 'Deep Scan'} running
           </p>
           <button
-            type="button"
             data-testid="btn-cancel-scan"
             onClick={() => cancelMutation.mutate()}
-            className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded"
+            className="text-xs text-immich-error hover:text-immich-error/80 focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             Cancel
           </button>
@@ -102,13 +101,11 @@ function ScanPanel({ scanStatus, onScanStarted }) {
       <div className="flex gap-2 mb-4">
         {['quick', 'deep'].map((tab) => (
           <button
-            type="button"
             key={tab}
             data-testid={`tab-${tab}`}
-            role="tab"
             aria-selected={activeTab === tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary ${
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-immich-primary ${
               activeTab === tab
                 ? 'bg-immich-primary text-white'
                 : 'text-immich-muted hover:text-immich-text'
@@ -130,10 +127,9 @@ function ScanPanel({ scanStatus, onScanStarted }) {
             </p>
           )}
           <button
-            type="button"
             onClick={() => quickMutation.mutate()}
             disabled={quickMutation.isPending}
-            className="px-4 py-2 bg-immich-primary text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+            className="px-4 py-2 bg-immich-primary text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             {quickMutation.isPending ? 'Scanning…' : 'Run Quick Scan'}
           </button>
@@ -149,7 +145,7 @@ function ScanPanel({ scanStatus, onScanStarted }) {
                 type="date"
                 value={dateFrom}
                 onChange={(e) => { setDateFrom(e.target.value); setEstimate(null) }}
-                className="w-full bg-immich-bg border border-immich-border rounded-lg px-3 py-1.5 text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+                className="w-full bg-immich-bg border border-immich-border rounded-lg px-3 py-1.5 text-immich-text text-sm focus-visible:ring-2 focus-visible:ring-immich-primary"
               />
             </div>
             <div className="flex-1">
@@ -160,18 +156,17 @@ function ScanPanel({ scanStatus, onScanStarted }) {
                 type="date"
                 value={dateTo}
                 onChange={(e) => { setDateTo(e.target.value); setEstimate(null) }}
-                className="w-full bg-immich-bg border border-immich-border rounded-lg px-3 py-1.5 text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+                className="w-full bg-immich-bg border border-immich-border rounded-lg px-3 py-1.5 text-immich-text text-sm focus-visible:ring-2 focus-visible:ring-immich-primary"
               />
             </div>
           </div>
 
           {dateFrom && dateTo && (
             <button
-              type="button"
               data-testid="btn-estimate"
               onClick={handleEstimate}
               disabled={estimating}
-              className="text-immich-muted text-xs underline hover:text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded"
+              className="text-immich-muted text-xs underline hover:text-immich-text"
             >
               {estimating ? 'Estimating…' : 'Estimate scan time'}
             </button>
@@ -193,11 +188,10 @@ function ScanPanel({ scanStatus, onScanStarted }) {
           )}
 
           <button
-            type="button"
             data-testid="btn-start-deep"
             onClick={() => deepMutation.mutate()}
             disabled={!dateFrom || !dateTo || deepMutation.isPending}
-            className="px-4 py-2 bg-immich-primary text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+            className="px-4 py-2 bg-immich-primary text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             {deepMutation.isPending ? 'Starting…' : 'Start Deep Scan'}
           </button>
@@ -226,18 +220,18 @@ function GroupCard({ group, onClick }) {
 
   return (
     <button
-      type="button"
       data-testid={`group-card-${group.id}`}
       onClick={onClick}
-      className="bg-immich-surface border border-immich-border rounded-xl p-4 text-left hover:border-immich-primary transition-colors w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+      className="bg-immich-surface border border-immich-border rounded-xl p-4 text-left hover:border-immich-primary transition-colors w-full"
     >
       <div className="flex gap-2 mb-3">
         {preview.map((asset) => (
           <div key={asset.asset_id} className="relative flex-1">
             <img
               src={asset.thumbnail_url}
-              alt=""
+              alt={`Duplicate photo ${preview.indexOf(asset) + 1} of ${preview.length}`}
               className="w-full aspect-square object-cover rounded-lg"
+              loading="lazy"
             />
             {asset.asset_id === group.recommended_keep_id && (
               <span
@@ -295,7 +289,7 @@ function DetailPanel({ group, onClose }) {
     >
       <div className="flex items-center justify-between p-4 border-b border-immich-border">
         <h2 className="text-immich-text font-semibold">{assets.length} Similar Photos</h2>
-        <button type="button" onClick={onClose} aria-label="Close" className="text-immich-muted hover:text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">
+        <button onClick={onClose} aria-label="Close" className="text-immich-muted hover:text-immich-text">
           <XMarkIcon className="w-5 h-5" />
         </button>
       </div>
@@ -306,10 +300,8 @@ function DetailPanel({ group, onClose }) {
           {assets.map((asset) => (
             <div key={asset.asset_id} className="flex-1">
               <button
-                type="button"
                 onClick={() => setKeepId(asset.asset_id)}
-                aria-label={`Select ${asset.filename || asset.asset_id.slice(0, 8)} to keep`}
-                className={`w-full rounded-xl overflow-hidden ring-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary ${
+                className={`w-full rounded-xl overflow-hidden ring-2 transition-all focus-visible:ring-immich-primary ${
                   keepId === asset.asset_id
                     ? 'ring-immich-primary'
                     : 'ring-transparent opacity-60 hover:opacity-90'
@@ -317,8 +309,9 @@ function DetailPanel({ group, onClose }) {
               >
                 <img
                   src={asset.thumbnail_url}
-                  alt=""
+                  alt={`Photo variant: ${asset.filename || asset.asset_id.slice(0, 8)}`}
                   className="w-full aspect-square object-cover"
+                  loading="lazy"
                 />
               </button>
               {keepId === asset.asset_id && (
@@ -336,7 +329,7 @@ function DetailPanel({ group, onClose }) {
             <tr className="border-b border-immich-border">
               <th scope="col" className="text-left py-1 font-medium">Field</th>
               {assets.map((a) => (
-                <th scope="col" key={a.asset_id} className="text-left py-1 font-medium">
+                <th key={a.asset_id} scope="col" className="text-left py-1 font-medium">
                   {a.filename || a.asset_id.slice(0, 8)}
                 </th>
               ))}
@@ -368,20 +361,18 @@ function DetailPanel({ group, onClose }) {
 
         <div className="flex items-center gap-3">
           <button
-            type="button"
             data-testid="btn-delete-others"
             onClick={() => resolveMutation.mutate()}
             disabled={resolveMutation.isPending}
-            className="flex items-center gap-1.5 px-4 py-2 bg-red-700 text-white text-sm font-medium rounded-lg hover:bg-red-600 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+            className="flex items-center gap-1.5 px-4 py-2 bg-immich-error-border text-white text-sm font-medium rounded-lg hover:bg-immich-error disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-immich-primary"
           >
             <TrashIcon className="w-4 h-4" />
             {resolveMutation.isPending ? 'Deleting…' : 'Delete others & close'}
           </button>
           <button
-            type="button"
             onClick={() => dismissMutation.mutate()}
             disabled={dismissMutation.isPending}
-            className="text-immich-muted text-sm hover:text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded"
+            className="text-immich-muted text-sm hover:text-immich-text"
           >
             Skip (keep all)
           </button>
@@ -418,9 +409,8 @@ function ResultsPanel({ groupsData, isLoading }) {
             {totalGroups} duplicate groups · {removable} photos removable · {formatBytes(savings)} savings
           </p>
           <button
-            type="button"
             onClick={handleIncludeResolvedToggle}
-            className="text-immich-muted text-xs underline hover:text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded"
+            className="text-immich-muted text-xs underline hover:text-immich-text"
           >
             {showResolved ? 'Hide resolved' : 'Show resolved'}
           </button>

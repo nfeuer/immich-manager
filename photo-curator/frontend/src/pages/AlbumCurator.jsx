@@ -39,21 +39,20 @@ export default function AlbumCurator() {
       <div className="sticky top-0 bg-immich-bg/95 backdrop-blur border-b border-immich-border px-4 py-3 z-10">
         {/* Month switcher */}
         <div className="flex items-center gap-3 mb-3">
-          <button type="button" onClick={prevMonth} aria-label="Previous month" className="p-1.5 rounded-lg hover:bg-immich-surface transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
+          <button onClick={prevMonth} aria-label="Previous month" className="p-1.5 rounded-lg hover:bg-immich-surface transition-colors focus-visible:ring-2 focus-visible:ring-immich-primary">
             <ChevronLeftIcon className="w-5 h-5 text-immich-muted" />
           </button>
           <span data-testid="month-label" className="text-immich-text font-semibold text-lg min-w-[160px] text-center">
             {MONTH_NAMES[month - 1]} {year}
           </span>
-          <button type="button" onClick={nextMonth} aria-label="Next month" className="p-1.5 rounded-lg hover:bg-immich-surface transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
+          <button onClick={nextMonth} aria-label="Next month" className="p-1.5 rounded-lg hover:bg-immich-surface transition-colors focus-visible:ring-2 focus-visible:ring-immich-primary">
             <ChevronRightIcon className="w-5 h-5 text-immich-muted" />
           </button>
           <div className="ml-auto">
             <button
-              type="button"
               onClick={() => aiCurate()}
               disabled={rawTotal === 0 || isCurating}
-              className="flex items-center gap-2 px-4 py-2 bg-immich-primary text-white font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+              className="flex items-center gap-2 px-4 py-2 bg-immich-primary text-white font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40 text-sm focus-visible:ring-2 focus-visible:ring-immich-primary"
             >
               <SparklesIcon className="w-4 h-4" />
               {isCurating ? 'Curating…' : 'AI Curate'}

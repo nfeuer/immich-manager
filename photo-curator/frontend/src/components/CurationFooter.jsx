@@ -12,17 +12,15 @@ export default function CurationFooter({ selectedCount, recommendedCount, onSave
       </span>
       <div className="flex gap-2">
         <button
-          type="button"
           onClick={onReset}
-          className="px-4 py-2 bg-immich-surface text-immich-text font-medium rounded-lg border border-immich-border hover:bg-immich-border transition-colors text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+          className="px-4 py-2 bg-immich-surface text-immich-text font-medium rounded-lg border border-immich-border hover:bg-immich-border transition-colors text-sm focus-visible:ring-2 focus-visible:ring-immich-primary"
         >
           Reset
         </button>
         <button
-          type="button"
           onClick={onSave}
           disabled={isSaving || selectedCount === 0}
-          className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+          className="px-4 py-2 bg-immich-primary text-white font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 text-sm focus-visible:ring-2 focus-visible:ring-immich-primary"
         >
           {isSaving ? 'Saving…' : 'Save Album'}
         </button>
