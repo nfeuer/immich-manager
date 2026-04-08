@@ -13,8 +13,8 @@ const wrapper = ({ children }) =>
 describe('DiskHealthCard', () => {
   it('shows loading when data is undefined', () => {
     useDisks.mockReturnValue({ data: undefined, isLoading: true })
-    render(React.createElement(DiskHealthCard), { wrapper })
-    expect(screen.getByText(/loading/i)).toBeInTheDocument()
+    const { container } = render(React.createElement(DiskHealthCard), { wrapper })
+    expect(container.querySelector('[aria-hidden="true"].animate-pulse')).toBeInTheDocument()
   })
 
   it('renders a green OK badge for a healthy disk', () => {

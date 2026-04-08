@@ -1,6 +1,7 @@
 import { CheckCircleIcon, ExclamationCircleIcon, CubeIcon } from '@heroicons/react/24/outline'
 import { useStatus } from '../hooks/useDashboard.js'
 import StatusBadge from './StatusBadge.jsx'
+import Skeleton from './Skeleton.jsx'
 
 function HealthBadge({ healthy }) {
   return (
@@ -20,7 +21,16 @@ export default function ImmichStatusCard() {
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5">
       <h2 className="text-sm font-semibold text-immich-text mb-4">Immich</h2>
       {isLoading || !data ? (
-        <p className="text-immich-muted text-sm">Loading…</p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Skeleton height="0.75rem" width="40%" />
+            <Skeleton height="1.25rem" width="5rem" />
+          </div>
+          <div className="flex items-center justify-between">
+            <Skeleton height="0.75rem" width="35%" />
+            <Skeleton height="0.875rem" width="4rem" />
+          </div>
+        </div>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between">

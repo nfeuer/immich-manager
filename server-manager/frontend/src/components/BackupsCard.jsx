@@ -3,6 +3,7 @@ import { ArchiveBoxIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/2
 import { useBackups } from '../hooks/useDashboard.js'
 import { useInlineConfirm } from '../hooks/useInlineConfirm.js'
 import StatusBadge from './StatusBadge.jsx'
+import Skeleton from './Skeleton.jsx'
 
 function BackupStatusBadge({ status }) {
   const ok = status === 'success'
@@ -50,7 +51,14 @@ export default function BackupsCard() {
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5 flex flex-col">
       <h2 className="text-sm font-semibold text-immich-text mb-4">Backups</h2>
       {isLoading ? (
-        <p className="text-immich-muted text-sm">Loading…</p>
+        <div className="space-y-2 mb-4 flex-1">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center justify-between">
+              <Skeleton height="0.75rem" width="40%" />
+              <Skeleton height="1.25rem" width="4rem" />
+            </div>
+          ))}
+        </div>
       ) : history.length === 0 ? (
         <p className="text-immich-muted text-sm mb-4">No backups yet</p>
       ) : (

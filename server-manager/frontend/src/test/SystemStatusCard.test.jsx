@@ -17,8 +17,8 @@ function wrapper({ children }) {
 describe('SystemStatusCard', () => {
   it('shows loading state when data is undefined', () => {
     useStatus.mockReturnValue({ data: undefined, isLoading: true })
-    render(React.createElement(SystemStatusCard), { wrapper })
-    expect(screen.getByText(/loading/i)).toBeInTheDocument()
+    const { container } = render(React.createElement(SystemStatusCard), { wrapper })
+    expect(container.querySelector('[aria-hidden="true"].animate-pulse')).toBeInTheDocument()
   })
 
   it('renders CPU percent without GB value', () => {

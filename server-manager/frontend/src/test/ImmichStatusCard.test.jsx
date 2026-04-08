@@ -13,8 +13,8 @@ const wrapper = ({ children }) =>
 describe('ImmichStatusCard', () => {
   it('shows loading state when data is undefined', () => {
     useStatus.mockReturnValue({ data: undefined, isLoading: true })
-    render(React.createElement(ImmichStatusCard), { wrapper })
-    expect(screen.getByText(/loading/i)).toBeInTheDocument()
+    const { container } = render(React.createElement(ImmichStatusCard), { wrapper })
+    expect(container.querySelector('[aria-hidden="true"].animate-pulse')).toBeInTheDocument()
   })
 
   it('renders green Healthy badge when immich is healthy', () => {

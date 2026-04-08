@@ -1,6 +1,7 @@
 import { CircleStackIcon, CheckCircleIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { useDisks } from '../hooks/useDashboard.js'
 import StatusBadge from './StatusBadge.jsx'
+import Skeleton from './Skeleton.jsx'
 
 function SmartBadge({ pass }) {
   return (
@@ -21,7 +22,14 @@ export default function DiskHealthCard() {
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5">
       <h2 className="text-sm font-semibold text-immich-text mb-4">Disk Health</h2>
       {isLoading ? (
-        <p className="text-immich-muted text-sm">Loading…</p>
+        <div className="space-y-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center justify-between">
+              <Skeleton height="0.75rem" width="45%" />
+              <Skeleton height="1.25rem" width="3.5rem" />
+            </div>
+          ))}
+        </div>
       ) : disks.length === 0 ? (
         <p className="text-immich-muted text-sm">No disk data</p>
       ) : (

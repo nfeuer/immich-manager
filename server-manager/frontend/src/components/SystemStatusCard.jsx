@@ -1,6 +1,7 @@
 import { CpuChipIcon, CircleStackIcon, ServerIcon } from '@heroicons/react/24/outline'
 import { useStatus } from '../hooks/useDashboard.js'
 import { metricBarColor, metricColor } from '../utils/thresholds.js'
+import Skeleton from './Skeleton.jsx'
 
 function MetricRow({ label, icon: Icon, pct, suffix }) {
   return (
@@ -31,7 +32,14 @@ export default function SystemStatusCard() {
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5">
       <h2 className="text-sm font-semibold text-immich-text mb-4">System</h2>
       {isLoading || !data ? (
-        <p className="text-immich-muted text-sm">Loading…</p>
+        <div className="space-y-4">
+          {[0, 1, 2].map((i) => (
+            <div key={i}>
+              <Skeleton className="mb-1" height="0.75rem" width="40%" />
+              <Skeleton height="0.375rem" width="100%" />
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           <MetricRow label="CPU" icon={CpuChipIcon} pct={Number(data.system.cpu_percent)} />

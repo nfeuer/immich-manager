@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '../utils/api'
+import Skeleton from '../components/Skeleton'
 
 function StatCard({ label, value }) {
   return (
@@ -20,7 +21,14 @@ export default function Analytics() {
     <div className="p-6">
       <h1 className="text-immich-text text-2xl font-semibold mb-6">Analytics</h1>
       {isLoading ? (
-        <p className="text-immich-muted">Loading…</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="bg-immich-surface border border-immich-border rounded-xl p-5">
+              <Skeleton height="0.875rem" width="50%" className="mb-2" />
+              <Skeleton height="1.875rem" width="70%" />
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
