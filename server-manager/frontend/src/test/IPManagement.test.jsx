@@ -77,8 +77,9 @@ describe('IPManagement', () => {
 
   it('shows Trusted tab content by default', () => {
     render(React.createElement(IPManagement), { wrapper })
-    expect(screen.getByText('192.168.1.10')).toBeInTheDocument()
-    expect(screen.getByText('Home')).toBeInTheDocument()
+    // Both desktop table and mobile card render the IP — either is acceptable
+    expect(screen.getAllByText('192.168.1.10').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Home').length).toBeGreaterThanOrEqual(1)
   })
 
   it('switches to Pending tab and shows pending IPs', () => {
@@ -104,8 +105,9 @@ describe('IPManagement', () => {
 
   it('shows Edit and Revoke buttons in Trusted tab', () => {
     render(React.createElement(IPManagement), { wrapper })
-    expect(screen.getByText('Edit')).toBeInTheDocument()
-    expect(screen.getByText('Revoke')).toBeInTheDocument()
+    // Both desktop and mobile render action buttons — at least one of each must exist
+    expect(screen.getAllByRole('button', { name: 'Edit' }).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByRole('button', { name: 'Revoke' }).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows Approve and Blacklist buttons in Pending tab', () => {
@@ -118,6 +120,7 @@ describe('IPManagement', () => {
   it('shows empty state when no trusted IPs', () => {
     useTrustedIPs.mockReturnValue({ data: { trusted: [] }, isLoading: false })
     render(React.createElement(IPManagement), { wrapper })
-    expect(screen.getByText('No trusted IPs')).toBeInTheDocument()
+    // Both desktop table cell and mobile paragraph render the empty state text
+    expect(screen.getAllByText('No trusted IPs').length).toBeGreaterThanOrEqual(1)
   })
 })

@@ -35,54 +35,92 @@ function TrustedTab() {
   const ips = data?.trusted || []
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-immich-muted text-left border-b border-immich-border">
-            <th scope="col" className="pb-2 pr-4">IP Address</th>
-            <th scope="col" className="pb-2 pr-4">Label</th>
-            <th scope="col" className="pb-2 pr-4">User</th>
-            <th scope="col" className="pb-2 pr-4">Access</th>
-            <th scope="col" className="pb-2 pr-4">Duration</th>
-            <th scope="col" className="pb-2 pr-4">Expires</th>
-            <th scope="col" className="pb-2 pr-4">Last Seen</th>
-            <th scope="col" className="pb-2 pr-4">7d Conns</th>
-            <th scope="col" className="pb-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ips.map((ip) => (
-            <tr key={ip.ip_address} className="border-b border-immich-border/50">
-              <td className="py-2 pr-4 font-mono text-xs">{ip.ip_address}</td>
-              <td className="py-2 pr-4">{ip.label || '\u2014'}</td>
-              <td className="py-2 pr-4 text-xs">{ip.verified_by || '\u2014'}</td>
-              <td className="py-2 pr-4">
-                <span className={`text-xs px-2 py-0.5 rounded ${ip.access_level === 'admin' ? 'bg-immich-error-muted text-immich-error' : 'bg-immich-info-muted text-immich-info'}`}>
+    <div>
+      {/* Desktop table */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-immich-muted text-left border-b border-immich-border">
+              <th scope="col" className="pb-2 pr-4">IP Address</th>
+              <th scope="col" className="pb-2 pr-4">Label</th>
+              <th scope="col" className="pb-2 pr-4">User</th>
+              <th scope="col" className="pb-2 pr-4">Access</th>
+              <th scope="col" className="pb-2 pr-4">Duration</th>
+              <th scope="col" className="pb-2 pr-4">Expires</th>
+              <th scope="col" className="pb-2 pr-4">Last Seen</th>
+              <th scope="col" className="pb-2 pr-4">7d Conns</th>
+              <th scope="col" className="pb-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ips.map((ip) => (
+              <tr key={ip.ip_address} className="border-b border-immich-border/50">
+                <td className="py-2 pr-4 font-mono text-xs">{ip.ip_address}</td>
+                <td className="py-2 pr-4">{ip.label || '\u2014'}</td>
+                <td className="py-2 pr-4 text-xs">{ip.verified_by || '\u2014'}</td>
+                <td className="py-2 pr-4">
+                  <span className={`text-xs px-2 py-0.5 rounded ${ip.access_level === 'admin' ? 'bg-immich-error-muted text-immich-error' : 'bg-immich-info-muted text-immich-info'}`}>
+                    {ip.access_level}
+                  </span>
+                </td>
+                <td className="py-2 pr-4 text-xs">{ip.trust_duration}</td>
+                <td className="py-2 pr-4 text-xs">{ip.expires_at ? new Date(ip.expires_at).toLocaleDateString() : 'Never'}</td>
+                <td className="py-2 pr-4 text-xs">{timeAgo(ip.last_seen)}</td>
+                <td className="py-2 pr-4 text-xs">{ip.connections_7d ?? 0}</td>
+                <td className="py-2">
+                  <div className="flex gap-1">
+                    <button type="button" onClick={() => { setEditingIp(ip.ip_address); setEditLabel(ip.label || ''); setEditDuration(ip.trust_duration || '24h') }}
+                      className="min-h-[44px] px-3 text-xs text-immich-info hover:bg-immich-info-muted rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-info">Edit</button>
+                    <button type="button" onClick={() => setRevokeIp(ip.ip_address)}
+                      className="min-h-[44px] px-3 text-xs text-immich-error hover:bg-immich-error-muted rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error">Revoke</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {ips.length === 0 && (
+              <tr><td colSpan={9} className="py-4 text-center text-immich-muted">No trusted IPs</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {ips.length === 0 ? (
+          <p className="py-4 text-center text-immich-muted text-sm">No trusted IPs</p>
+        ) : (
+          ips.map((ip) => (
+            <div key={ip.ip_address} className="bg-immich-bg border border-immich-border rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2 gap-2">
+                <span className="font-mono text-sm break-all">{ip.ip_address}</span>
+                <span className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${ip.access_level === 'admin' ? 'bg-immich-error-muted text-immich-error' : 'bg-immich-info-muted text-immich-info'}`}>
                   {ip.access_level}
                 </span>
-              </td>
-              <td className="py-2 pr-4 text-xs">{ip.trust_duration}</td>
-              <td className="py-2 pr-4 text-xs">{ip.expires_at ? new Date(ip.expires_at).toLocaleDateString() : 'Never'}</td>
-              <td className="py-2 pr-4 text-xs">{timeAgo(ip.last_seen)}</td>
-              <td className="py-2 pr-4 text-xs">{ip.connections_7d ?? 0}</td>
-              <td className="py-2 flex gap-2">
+              </div>
+              <dl className="space-y-1 text-xs mb-3">
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">Label</dt><dd className="text-right">{ip.label || '—'}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">User</dt><dd className="text-right">{ip.verified_by || '—'}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">Duration</dt><dd className="text-right">{ip.trust_duration}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">Expires</dt><dd className="text-right">{ip.expires_at ? new Date(ip.expires_at).toLocaleDateString() : 'Never'}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">Last seen</dt><dd className="text-right">{timeAgo(ip.last_seen)}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-immich-muted">7d connections</dt><dd className="text-right">{ip.connections_7d ?? 0}</dd></div>
+              </dl>
+              <div className="flex gap-2">
                 <button type="button" onClick={() => { setEditingIp(ip.ip_address); setEditLabel(ip.label || ''); setEditDuration(ip.trust_duration || '24h') }}
-                  className="text-xs text-immich-info hover:text-immich-info/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-info rounded">Edit</button>
+                  className="flex-1 min-h-[44px] text-sm text-immich-info border border-immich-info/40 hover:bg-immich-info-muted rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-info">Edit</button>
                 <button type="button" onClick={() => setRevokeIp(ip.ip_address)}
-                  className="text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Revoke</button>
-              </td>
-            </tr>
-          ))}
-          {ips.length === 0 && (
-            <tr><td colSpan={9} className="py-4 text-center text-immich-muted">No trusted IPs</td></tr>
-          )}
-        </tbody>
-      </table>
+                  className="flex-1 min-h-[44px] text-sm text-immich-error border border-immich-error/40 hover:bg-immich-error-muted rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error">Revoke</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
 
+      {/* Edit panel */}
       {editingIp && (
         <div className="mt-4 p-4 bg-immich-bg border border-immich-border rounded-lg">
           <h4 className="text-sm font-medium mb-2">Edit {editingIp}</h4>
-          <div className="flex gap-3 items-end">
+          <div className="flex gap-3 items-end flex-wrap">
             <div>
               <label htmlFor="edit-label" className="text-xs text-immich-muted block mb-1">Label</label>
               <input id="edit-label" value={editLabel} onChange={(e) => setEditLabel(e.target.value)}
@@ -96,13 +134,14 @@ function TrustedTab() {
               </select>
             </div>
             <button type="button" onClick={() => { updateMut.mutate({ ip: editingIp, label: editLabel, trust_duration: editDuration }); setEditingIp(null) }}
-              className="px-3 py-1 bg-immich-primary hover:bg-immich-primary-hover text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">Save</button>
+              className="px-3 py-2 bg-immich-primary hover:bg-immich-primary-hover text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary min-h-[44px]">Save</button>
             <button type="button" onClick={() => setEditingIp(null)}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">Cancel</button>
+              className="px-3 py-2 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded min-h-[44px]">Cancel</button>
           </div>
         </div>
       )}
 
+      {/* Revoke panel */}
       {revokeIp && (
         <div className="mt-4 p-4 bg-immich-bg border border-immich-error-border/50 rounded-lg">
           <h4 className="text-sm font-medium text-immich-error mb-2">Revoke {revokeIp}</h4>
@@ -112,9 +151,9 @@ function TrustedTab() {
             className="w-full px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error" />
           <div className="flex gap-2">
             <button type="button" onClick={() => { revokeMut.mutate({ ip_address: revokeIp, reason: revokeReason }); setRevokeIp(null); setRevokeReason('') }}
-              className="px-3 py-1 bg-immich-error text-white hover:bg-immich-error/90 text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error">Confirm Revoke</button>
+              className="px-3 py-2 bg-immich-error text-white text-sm rounded hover:bg-immich-error/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error min-h-[44px]">Confirm Revoke</button>
             <button type="button" onClick={() => { setRevokeIp(null); setRevokeReason('') }}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">Cancel</button>
+              className="px-3 py-2 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded min-h-[44px]">Cancel</button>
           </div>
         </div>
       )}
