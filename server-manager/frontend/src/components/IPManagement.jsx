@@ -57,7 +57,7 @@ function TrustedTab() {
               <td className="py-2 pr-4">{ip.label || '\u2014'}</td>
               <td className="py-2 pr-4 text-xs">{ip.verified_by || '\u2014'}</td>
               <td className="py-2 pr-4">
-                <span className={`text-xs px-2 py-0.5 rounded ${ip.access_level === 'admin' ? 'bg-red-500/20 text-red-300' : 'bg-blue-500/20 text-blue-300'}`}>
+                <span className={`text-xs px-2 py-0.5 rounded ${ip.access_level === 'admin' ? 'bg-immich-error-muted text-immich-error' : 'bg-immich-info-muted text-immich-info'}`}>
                   {ip.access_level}
                 </span>
               </td>
@@ -67,9 +67,9 @@ function TrustedTab() {
               <td className="py-2 pr-4 text-xs">{ip.connections_7d ?? 0}</td>
               <td className="py-2 flex gap-2">
                 <button type="button" onClick={() => { setEditingIp(ip.ip_address); setEditLabel(ip.label || ''); setEditDuration(ip.trust_duration || '24h') }}
-                  className="text-xs text-blue-400 hover:text-blue-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Edit</button>
+                  className="text-xs text-immich-info hover:text-immich-info/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-info rounded">Edit</button>
                 <button type="button" onClick={() => setRevokeIp(ip.ip_address)}
-                  className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">Revoke</button>
+                  className="text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Revoke</button>
               </td>
             </tr>
           ))}
@@ -86,19 +86,19 @@ function TrustedTab() {
             <div>
               <label htmlFor="edit-label" className="text-xs text-immich-muted block mb-1">Label</label>
               <input id="edit-label" value={editLabel} onChange={(e) => setEditLabel(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400" />
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary" />
             </div>
             <div>
               <label htmlFor="edit-duration" className="text-xs text-immich-muted block mb-1">Duration</label>
               <select id="edit-duration" value={editDuration} onChange={(e) => setEditDuration(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
                 {DURATION_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
             <button type="button" onClick={() => { updateMut.mutate({ ip: editingIp, label: editLabel, trust_duration: editDuration }); setEditingIp(null) }}
-              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">Save</button>
+              className="px-3 py-1 bg-immich-primary hover:bg-immich-primary-hover text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">Save</button>
             <button type="button" onClick={() => setEditingIp(null)}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Cancel</button>
+              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">Cancel</button>
           </div>
         </div>
       )}
@@ -109,12 +109,12 @@ function TrustedTab() {
           <label htmlFor="revoke-reason" className="sr-only">Reason for revoking</label>
           <input id="revoke-reason" value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)}
             placeholder="Reason (optional)"
-            className="w-full px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400" />
+            className="w-full px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error" />
           <div className="flex gap-2">
             <button type="button" onClick={() => { revokeMut.mutate({ ip_address: revokeIp, reason: revokeReason }); setRevokeIp(null); setRevokeReason('') }}
-              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">Confirm Revoke</button>
+              className="px-3 py-1 bg-immich-error text-white hover:bg-immich-error/90 text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error">Confirm Revoke</button>
             <button type="button" onClick={() => { setRevokeIp(null); setRevokeReason('') }}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Cancel</button>
+              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">Cancel</button>
           </div>
         </div>
       )}
@@ -152,9 +152,9 @@ function PendingTab() {
               <td className="py-2 pr-4 text-xs">{timeAgo(ip.created_at)}</td>
               <td className="py-2 flex gap-2">
                 <button type="button" onClick={() => setApproveIp(ip.ip_address)}
-                  className="text-xs text-green-400 hover:text-green-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400 rounded">Approve</button>
+                  className="text-xs text-immich-success hover:text-immich-success/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-success rounded">Approve</button>
                 <button type="button" onClick={() => revokeMut.mutate({ ip_address: ip.ip_address })}
-                  className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">Blacklist</button>
+                  className="text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Blacklist</button>
               </td>
             </tr>
           ))}
@@ -171,7 +171,7 @@ function PendingTab() {
             <div>
               <label htmlFor="approve-level" className="text-xs text-immich-muted block mb-1">Access Level</label>
               <select id="approve-level" value={approveLevel} onChange={(e) => setApproveLevel(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400">
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-success">
                 <option value="user">User (Photo Curator only)</option>
                 <option value="admin">Admin (All services)</option>
               </select>
@@ -179,16 +179,16 @@ function PendingTab() {
             <div>
               <label htmlFor="approve-duration" className="text-xs text-immich-muted block mb-1">Duration</label>
               <select id="approve-duration" value={approveDuration} onChange={(e) => setApproveDuration(e.target.value)}
-                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400">
+                className="px-2 py-1 bg-immich-surface border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-success">
                 {DURATION_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
             <button onClick={() => {
               approveMut.mutate({ ip_address: approveIp, access_level: approveLevel, trust_duration: approveDuration })
               setApproveIp(null)
-            }} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400">Confirm</button>
+            }} className="px-3 py-1 bg-immich-success text-white hover:bg-immich-success/90 text-sm rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-success">Confirm</button>
             <button type="button" onClick={() => setApproveIp(null)}
-              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">Cancel</button>
+              className="px-3 py-1 text-immich-muted hover:text-immich-text text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded">Cancel</button>
           </div>
         </div>
       )}
@@ -227,9 +227,9 @@ function BlacklistedTab() {
               <td className="py-2 pr-4 text-xs">{ip.revoke_reason || '\u2014'}</td>
               <td className="py-2 flex gap-2">
                 <button type="button" onClick={() => unblockMut.mutate({ ip_address: ip.ip_address })}
-                  className="text-xs text-yellow-400 hover:text-yellow-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 rounded">Unblock</button>
+                  className="text-xs text-immich-warning hover:text-immich-warning/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-warning rounded">Unblock</button>
                 <button type="button" onClick={() => deleteMut.mutate(ip.ip_address)}
-                  className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">Delete</button>
+                  className="text-xs text-immich-error hover:text-immich-error/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-error rounded">Delete</button>
               </td>
             </tr>
           ))}
@@ -252,10 +252,10 @@ function ConnectionsTab() {
       <div className="flex gap-3 mb-4">
         <label htmlFor="conn-filter-ip" className="sr-only">Filter by IP</label>
         <input id="conn-filter-ip" placeholder="Filter by IP" onChange={(e) => setFilters(f => ({ ...f, ip: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text w-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400" />
+          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text w-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary" />
         <label htmlFor="conn-filter-service" className="sr-only">Filter by service</label>
         <select id="conn-filter-service" onChange={(e) => setFilters(f => ({ ...f, service: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
           <option value="">All services</option>
           <option value="server-manager">server-manager</option>
           <option value="photo-curator">photo-curator</option>
@@ -263,7 +263,7 @@ function ConnectionsTab() {
         </select>
         <label htmlFor="conn-filter-action" className="sr-only">Filter by action</label>
         <select id="conn-filter-action" onChange={(e) => setFilters(f => ({ ...f, action: e.target.value || undefined }))}
-          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+          className="px-2 py-1 bg-immich-bg border border-immich-border rounded text-sm text-immich-text focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary">
           <option value="">All actions</option>
           <option value="allowed">allowed</option>
           <option value="challenged">challenged</option>
@@ -296,7 +296,7 @@ function ConnectionsTab() {
                       c.action === 'allowed' ? 'text-immich-success' :
                       c.action === 'blocked' ? 'text-immich-error' :
                       c.action === 'challenged' ? 'text-immich-warning' :
-                      'text-orange-400'
+                      'text-immich-log-untagged'
                     }`}>{c.action}</span>
                   </td>
                   <td className="py-1.5 text-xs">{c.user_id || '\u2014'}</td>
@@ -319,7 +319,7 @@ export default function IPManagement() {
   return (
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5 mb-6">
       <div className="flex items-center gap-2 mb-4">
-        <ShieldCheckIcon className="w-5 h-5 text-blue-400" />
+        <ShieldCheckIcon className="w-5 h-5 text-immich-info" />
         <h2 className="text-lg font-semibold">IP Security</h2>
       </div>
 
@@ -329,9 +329,9 @@ export default function IPManagement() {
             type="button"
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded-t ${
+            className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary rounded-t ${
               activeTab === tab
-                ? 'text-blue-400 border-blue-400'
+                ? 'text-immich-info border-immich-info'
                 : 'text-immich-muted border-transparent hover:text-immich-text'
             }`}
           >
