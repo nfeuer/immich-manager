@@ -47,7 +47,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-immich-bg text-immich-text">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <main id="main" className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <Header />
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
             <SystemStatusCard />
@@ -61,7 +61,7 @@ export default function App() {
           <DiscordConfig />
           <UpdateManagement />
           <IPManagement />
-        </div>
+        </main>
       </div>
     </ErrorBoundary>
   )

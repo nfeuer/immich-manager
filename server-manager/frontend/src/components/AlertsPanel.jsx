@@ -15,7 +15,7 @@ export default function AlertsPanel() {
 
   return (
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5 mb-6">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-immich-muted mb-4 flex items-center gap-1.5">
+      <h2 className="text-sm font-semibold text-immich-text mb-4 flex items-center gap-1.5">
         <BellAlertIcon className="w-3.5 h-3.5" /> Alerts
       </h2>
       <div className="space-y-2">

@@ -451,7 +451,7 @@ export default function IPManagement() {
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5 mb-6">
       <div className="flex items-center gap-2 mb-4">
         <ShieldCheckIcon className="w-5 h-5 text-immich-info" />
-        <h2 className="text-lg font-semibold">IP Security</h2>
+        <h2 className="text-sm font-semibold text-immich-text">IP Security</h2>
       </div>
 
       <div className="flex gap-1 mb-4 border-b border-immich-border">

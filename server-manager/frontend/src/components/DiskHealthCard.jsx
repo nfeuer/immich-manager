@@ -19,7 +19,7 @@ export default function DiskHealthCard() {
 
   return (
     <div className="bg-immich-surface border border-immich-border rounded-2xl p-5">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-immich-muted mb-4">Disk Health</h2>
+      <h2 className="text-sm font-semibold text-immich-text mb-4">Disk Health</h2>
       {isLoading ? (
         <p className="text-immich-muted text-sm">Loading…</p>
       ) : disks.length === 0 ? (
