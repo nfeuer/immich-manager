@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../utils/api'
 import { TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { useFocusTrap } from '../hooks/useFocusTrap.js'
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -256,6 +257,7 @@ function GroupCard({ group, onClick }) {
 function DetailPanel({ group, onClose }) {
   const [keepId, setKeepId] = useState(group.recommended_keep_id)
   const queryClient = useQueryClient()
+  const containerRef = useFocusTrap({ active: true, onEscape: onClose })
 
   const resolveMutation = useMutation({
     mutationFn: () =>
@@ -284,11 +286,15 @@ function DetailPanel({ group, onClose }) {
 
   return (
     <div
+      ref={containerRef}
       data-testid="detail-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="detail-panel-title"
       className="fixed inset-y-0 right-0 w-full max-w-2xl bg-immich-surface border-l border-immich-border shadow-xl z-50 overflow-y-auto"
     >
       <div className="flex items-center justify-between p-4 border-b border-immich-border">
-        <h2 className="text-immich-text font-semibold">{assets.length} Similar Photos</h2>
+        <h2 id="detail-panel-title" className="text-immich-text font-semibold">{assets.length} Similar Photos</h2>
         <button onClick={onClose} aria-label="Close" className="text-immich-muted hover:text-immich-text">
           <XMarkIcon className="w-5 h-5" />
         </button>
