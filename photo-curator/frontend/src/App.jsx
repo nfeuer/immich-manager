@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useAuth } from './hooks/useAuth'
 import { AuthError } from './utils/api'
+import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import AlbumCurator from './pages/AlbumCurator'
@@ -55,8 +56,10 @@ function AppInner() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppInner />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AppInner />
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }
