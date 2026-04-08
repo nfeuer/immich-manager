@@ -118,7 +118,7 @@ export default function UpdateManagement() {
               type="button"
               onClick={() => { applyUpdate() }}
               disabled={updating}
-              className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              className="px-4 py-1.5 bg-immich-warning hover:bg-immich-warning/90 disabled:opacity-50 text-immich-bg rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
             >
               Update anyway
             </button>
@@ -132,7 +132,7 @@ export default function UpdateManagement() {
               type="button"
               onClick={() => { applyUpdate() }}
               disabled={updating}
-              className="px-4 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="px-4 py-1.5 bg-immich-primary hover:bg-immich-primary-hover disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
             >
               Apply Update
             </button>
@@ -143,7 +143,7 @@ export default function UpdateManagement() {
       {updating && progressLines.length > 0 && (
         <pre
           ref={progressRef}
-          className="bg-[#080810] text-gray-300 rounded-xl p-3 text-xs font-mono max-h-32 sm:max-h-40 md:max-h-52 overflow-y-auto whitespace-pre-wrap mb-4"
+          className="bg-immich-terminal text-immich-log-info rounded-xl p-3 text-xs font-mono max-h-32 sm:max-h-40 md:max-h-52 overflow-y-auto whitespace-pre-wrap mb-4"
         >
           {progressLines.map((l, i) => (
             <span key={i} className={

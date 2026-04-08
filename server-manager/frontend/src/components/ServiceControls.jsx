@@ -65,7 +65,7 @@ export default function ServiceControls() {
               onClick={() => { restartService(svc) }}
               disabled={(states[svc] ?? 'idle') === 'loading'}
               aria-label={`Restart ${svc}`}
-              className="px-3 py-1.5 bg-immich-primary hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors duration-150 min-w-[64px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
+              className="px-3 py-1.5 bg-immich-primary hover:bg-immich-primary-hover disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors duration-150 min-w-[64px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
             >
               <ButtonContent state={states[svc] ?? 'idle'} />
             </button>
@@ -76,7 +76,7 @@ export default function ServiceControls() {
         <button
           type="button"
           onClick={() => { restartAll() }}
-          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+          className="px-4 py-2 bg-immich-warning hover:bg-immich-warning/90 text-immich-bg rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
         >
           Restart All Immich Services
         </button>

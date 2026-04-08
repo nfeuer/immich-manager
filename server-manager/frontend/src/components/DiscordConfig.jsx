@@ -32,7 +32,7 @@ function Field({ label, htmlFor, children }) {
   )
 }
 
-const inputClass = 'w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-sm text-immich-text placeholder-immich-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus:border-blue-500 transition-colors'
+const inputClass = 'w-full px-3 py-2 bg-immich-bg border border-immich-border rounded-lg text-sm text-immich-text placeholder-immich-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary transition-colors'
 
 export default function DiscordConfig() {
   const { data, isLoading, isError } = useDiscordConfig()
@@ -165,7 +165,7 @@ export default function DiscordConfig() {
                 type="button"
                 onClick={() => testAlertMut.mutate()}
                 disabled={!discord.enabled || !discord.webhook_url || testAlertMut.isPending}
-                className="px-4 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="px-4 py-2 bg-immich-primary hover:bg-immich-primary-hover disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
               >
                 {testAlertMut.isPending ? 'Sending...' : testAlertMut.isSuccess ? 'Sent!' : testAlertMut.isError ? 'Failed' : 'Test Alert'}
               </button>
@@ -198,7 +198,7 @@ export default function DiscordConfig() {
                 type="button"
                 onClick={() => testDigestMut.mutate()}
                 disabled={!discord.enabled || !discord.webhook_url || testDigestMut.isPending}
-                className="px-4 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="px-4 py-2 bg-immich-primary hover:bg-immich-primary-hover disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
               >
                 {testDigestMut.isPending ? 'Sending...' : testDigestMut.isSuccess ? 'Sent!' : testDigestMut.isError ? 'Failed' : 'Test Digest'}
               </button>
@@ -260,7 +260,7 @@ export default function DiscordConfig() {
           type="button"
           onClick={handleSave}
           disabled={!dirty || updateMut.isPending}
-          className="px-5 py-2 bg-immich-primary hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg text-sm font-semibold transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="px-5 py-2 bg-immich-primary hover:bg-immich-primary-hover disabled:opacity-40 text-white rounded-lg text-sm font-semibold transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
         >
           {updateMut.isPending ? 'Saving...' : 'Save Changes'}
         </button>

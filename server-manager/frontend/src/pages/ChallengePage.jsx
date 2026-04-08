@@ -86,14 +86,14 @@ export default function ChallengePage() {
                   required
                   className="w-full pl-10 pr-3 py-2 bg-immich-bg border border-immich-border rounded-lg
                              text-immich-text placeholder-immich-muted/50 text-sm
-                             focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus:border-blue-500"
+                             focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary focus:border-immich-primary"
                 />
               </div>
               <button
                 type="submit"
                 disabled={submitting}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
-                           text-white text-sm font-medium rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="px-4 py-2 bg-immich-primary hover:bg-immich-primary-hover disabled:opacity-50
+                           text-white text-sm font-medium rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
               >
                 {submitting ? 'Sending...' : 'Verify'}
               </button>
@@ -104,8 +104,8 @@ export default function ChallengePage() {
           </form>
         ) : (
           <div className="mt-6">
-            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-              <p className="text-blue-300 text-sm">
+            <div className="bg-immich-info-muted border border-immich-info-border rounded-lg p-4">
+              <p className="text-immich-info text-sm">
                 A verification email has been sent if the account exists. Please check
                 your email and click the approval link.
               </p>
@@ -114,7 +114,7 @@ export default function ChallengePage() {
               type="button"
               onClick={checkStatus}
               className="mt-4 w-full px-4 py-2 bg-immich-bg border border-immich-border
-                         hover:border-blue-500 text-immich-text text-sm rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                         hover:border-immich-primary text-immich-text text-sm rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-immich-primary"
             >
               Refresh Status
             </button>
