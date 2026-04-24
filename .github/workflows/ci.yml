@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - name: Ruff check (syntax errors, undefined names)
+        run: ruff check --select E9,F63,F7,F82 server-manager/src/ shared/ photo-curator/src/
+
+  test-server-manager:
+    name: Server Manager Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: server-manager/requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install -r server-manager/requirements.txt
+          pip install pytest httpx
+      - name: Run tests
+        run: python -m pytest server-manager/tests/ -v --tb=short
+
+  test-smoke:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: server-manager/requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install -r server-manager/requirements.txt
+          pip install -r photo-curator/requirements.txt
+          pip install pytest
+      - name: Run smoke tests
+        run: python -m pytest tests/test_smoke.py -v --tb=short -k "not face_recognition and not scene_detector"

@@ -2,6 +2,7 @@
 Backup management for Immich database and files
 """
 
+import os
 import subprocess
 import shutil
 import gzip
