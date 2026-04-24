@@ -20,6 +20,7 @@ _DURATION_DELTAS = {
     "7d": timedelta(days=7),
     "30d": timedelta(days=30),
     "90d": timedelta(days=90),
+    "permanent": None,
 }
 
 

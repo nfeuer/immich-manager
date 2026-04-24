@@ -2,6 +2,7 @@
 Main FastAPI application for Immich Server Manager
 """
 
+import os
 import sys
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -1527,14 +1528,16 @@ def main():
     """Run the server"""
     try:
         config, _ = load_config()
+        dev_mode = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
 
         uvicorn.run(
             "src.main:app",
             host=config.server.host,
             port=config.server.port,
-            workers=config.server.workers,
+            workers=1 if dev_mode else config.server.workers,
             log_level=config.server.log_level.lower(),
-            reload=False
+            reload=dev_mode,
+            reload_dirs=["src", "../shared"] if dev_mode else None,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")

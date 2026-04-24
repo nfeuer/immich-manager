@@ -1,0 +1,18 @@
+# =============================================================================
+# photo-curator.dev.yml — Development override with hot-reload
+# =============================================================================
+# Usage:
+#   docker compose --env-file docker/.env \
+#     -f docker/core.yml -f docker/photo-curator.yml -f docker/photo-curator.dev.yml up
+#
+# Source code changes trigger automatic reload — no container restart needed.
+# =============================================================================
+
+services:
+  photo-curator:
+    volumes:
+      - ../photo-curator/src:/app/src
+      - ../shared:/app/shared
+    environment:
+      - DEV_MODE=1
+    command: ["python3", "-m", "src.main"]

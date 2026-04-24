@@ -2834,13 +2834,16 @@ def main():
                 "server": {"host": "0.0.0.0", "port": 8081, "workers": 2}
             }
 
+        dev_mode = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
+
         uvicorn.run(
             "src.main:app",
             host=cfg["server"]["host"],
             port=cfg["server"]["port"],
-            workers=cfg["server"].get("workers", 2),
+            workers=1 if dev_mode else cfg["server"].get("workers", 2),
             log_level="info",
-            reload=False
+            reload=dev_mode,
+            reload_dirs=["src", "shared"] if dev_mode else None,
         )
     except Exception as e:
         print(f"Error starting server: {e}")
