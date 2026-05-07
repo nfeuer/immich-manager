@@ -218,6 +218,7 @@ async def startup_event():
         gpu_monitor = GpuMonitor()
         system_power_monitor = SystemPowerMonitor(
             baseline_watts=config.monitoring.system_power_baseline_watts,
+            psu_efficiency=config.monitoring.psu_efficiency,
         )
         if gpu_monitor.available:
             logger.info("GPU monitor initialized (vendor=%s)", gpu_monitor.vendor)
@@ -497,13 +498,26 @@ async def collect_metrics_job():
         print(f"Error collecting metrics: {e}")
 
 
-_gpu_temp_alerted: Dict[int, bool] = {}
-_psu_alerted: bool = False
+def _alert_state_get(key: str) -> bool:
+    """Return True if the given alert state was previously raised.
+
+    Persisted in the alert_state table so service restarts don't re-fire
+    alerts that were already sent for an in-progress condition.
+    """
+    if not database:
+        return False
+    val = database.get_alert_state(key)
+    return val == "1"
+
+
+def _alert_state_set(key: str, raised: bool) -> None:
+    if not database:
+        return
+    database.set_alert_state(key, "1" if raised else "0")
 
 
 async def collect_gpu_metrics_job():
     """Sample GPU and system power and persist to the database."""
-    global _psu_alerted
     if not database or not gpu_monitor or not system_power_monitor:
         return
 
@@ -520,60 +534,66 @@ async def collect_gpu_metrics_job():
         if not config or not alert_manager:
             return
 
-        # Per-GPU temperature alerts (edge-triggered: alert once on transition).
+        warn = config.thresholds.gpu_temp_warning
+        crit = config.thresholds.gpu_temp_critical
+
         for gpu in gpus:
             idx = gpu.get("index")
             temp = gpu.get("temperature_c")
             if idx is None or temp is None:
                 continue
-            was_alerted = _gpu_temp_alerted.get(idx, False)
-            if temp >= config.thresholds.gpu_temp_critical:
-                if not was_alerted:
+            state_key = f"gpu_temp_{idx}"
+            was_raised = _alert_state_get(state_key)
+            if temp >= crit:
+                if not was_raised:
                     msg = (
                         f"GPU {idx} ({gpu.get('name', 'unknown')}) at {temp:.0f}°C "
-                        f"(critical: {config.thresholds.gpu_temp_critical}°C)"
+                        f"(critical: {crit}°C)"
                     )
                     await alert_manager.send_alert("Critical GPU Temperature", msg, "critical")
                     database.record_alert("critical", "gpu_temp", msg)
-                    _gpu_temp_alerted[idx] = True
-            elif temp >= config.thresholds.gpu_temp_warning:
-                if not was_alerted:
+                    _alert_state_set(state_key, True)
+            elif temp >= warn:
+                if not was_raised:
                     msg = (
                         f"GPU {idx} ({gpu.get('name', 'unknown')}) at {temp:.0f}°C "
-                        f"(warning: {config.thresholds.gpu_temp_warning}°C)"
+                        f"(warning: {warn}°C)"
                     )
                     await alert_manager.send_alert("High GPU Temperature", msg, "warning")
                     database.record_alert("warning", "gpu_temp", msg)
-                    _gpu_temp_alerted[idx] = True
-            elif temp < config.thresholds.gpu_temp_warning - 5:
+                    _alert_state_set(state_key, True)
+            elif temp < warn - 5:
                 # Hysteresis: clear alert state once we cool well below the warning line.
-                _gpu_temp_alerted[idx] = False
+                if was_raised:
+                    _alert_state_set(state_key, False)
 
-        # PSU headroom alert (when configured).
+        # PSU headroom (compares DC component sum against the PSU rating).
         psu_watts = config.thresholds.psu_watts
         total = power_sample.get("total_watts")
         if psu_watts > 0 and total is not None:
             pct = (total / psu_watts) * 100
+            psu_was_raised = _alert_state_get("psu_headroom")
             if pct >= config.thresholds.psu_critical_percent:
-                if not _psu_alerted:
+                if not psu_was_raised:
                     msg = (
-                        f"System power {total:.0f}W is {pct:.0f}% of {psu_watts}W PSU "
+                        f"System DC draw {total:.0f}W is {pct:.0f}% of {psu_watts}W PSU "
                         f"(critical: {config.thresholds.psu_critical_percent}%)"
                     )
                     await alert_manager.send_alert("PSU Headroom Critical", msg, "critical")
                     database.record_alert("critical", "psu_headroom", msg)
-                    _psu_alerted = True
+                    _alert_state_set("psu_headroom", True)
             elif pct >= config.thresholds.psu_warning_percent:
-                if not _psu_alerted:
+                if not psu_was_raised:
                     msg = (
-                        f"System power {total:.0f}W is {pct:.0f}% of {psu_watts}W PSU "
+                        f"System DC draw {total:.0f}W is {pct:.0f}% of {psu_watts}W PSU "
                         f"(warning: {config.thresholds.psu_warning_percent}%)"
                     )
                     await alert_manager.send_alert("PSU Headroom Warning", msg, "warning")
                     database.record_alert("warning", "psu_headroom", msg)
-                    _psu_alerted = True
+                    _alert_state_set("psu_headroom", True)
             elif pct < config.thresholds.psu_warning_percent - 5:
-                _psu_alerted = False
+                if psu_was_raised:
+                    _alert_state_set("psu_headroom", False)
 
     except Exception as e:
         logger.error("Error collecting GPU metrics: %s", e)
@@ -826,6 +846,12 @@ async def get_gpu_current(request: Request, user: Dict = Depends(require_admin))
         "system_power": power,
         "psu_watts": psu_watts,
         "psu_percent": psu_pct,
+        "thresholds": {
+            "gpu_temp_warning": config.thresholds.gpu_temp_warning if config else 80,
+            "gpu_temp_critical": config.thresholds.gpu_temp_critical if config else 90,
+            "psu_warning_percent": config.thresholds.psu_warning_percent if config else 80,
+            "psu_critical_percent": config.thresholds.psu_critical_percent if config else 95,
+        },
     }
 
 
@@ -843,6 +869,7 @@ async def get_gpu_history(
     hours = max(1, min(hours, 24 * 30))
     return {
         "hours": hours,
+        "sample_interval_seconds": config.monitoring.gpu_check_interval if config else 60,
         "gpu_metrics": database.get_gpu_history(hours=hours, gpu_index=gpu_index),
         "system_power": database.get_system_power_history(hours=hours),
     }

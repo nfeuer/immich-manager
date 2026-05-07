@@ -27,26 +27,47 @@ function wrapper({ children }) {
 const SAMPLE_GPU = {
   index: 0,
   uuid: 'GPU-A',
-  name: 'NVIDIA RTX 3060',
+  name: 'NVIDIA RTX 3090',
   vendor: 'nvidia',
   temperature_c: 55,
   util_percent: 22,
   mem_util_percent: 18,
   mem_used_mb: 4096,
-  mem_total_mb: 12288,
-  power_draw_w: 78.5,
-  power_limit_w: 170,
+  mem_total_mb: 24576,
+  power_draw_w: 178.5,
+  power_limit_w: 350,
+  pstate: 'P2',
+  fan_speed_percent: 45,
+  gfx_clock_mhz: 1500,
+  pcie_gen: 3,
+  pcie_width: 16,
+  driver_version: '550.54.14',
 }
 
 const SAMPLE_HISTORY = {
   hours: 168,
+  sample_interval_seconds: 10,
   gpu_metrics: [
     { ...SAMPLE_GPU, gpu_index: 0, timestamp: '2026-05-07 10:00:00' },
     { ...SAMPLE_GPU, gpu_index: 0, timestamp: '2026-05-07 10:05:00', temperature_c: 60 },
   ],
   system_power: [
-    { timestamp: '2026-05-07 10:00:00', total_watts: 200 },
-    { timestamp: '2026-05-07 10:05:00', total_watts: 220 },
+    {
+      timestamp: '2026-05-07 10:00:00',
+      total_watts: 240,
+      cpu_watts: 45,
+      gpu_watts: 130,
+      baseline_watts: 65,
+      ac_watts: 261,
+    },
+    {
+      timestamp: '2026-05-07 10:05:00',
+      total_watts: 260,
+      cpu_watts: 50,
+      gpu_watts: 145,
+      baseline_watts: 65,
+      ac_watts: 283,
+    },
   ],
 }
 
@@ -55,41 +76,80 @@ const SAMPLE_SUMMARY = {
     gpus: [
       {
         gpu_index: 0,
-        gpu_name: 'NVIDIA RTX 3060',
-        temp_max: 70,
-        temp_min: 45,
-        temp_avg: 55,
-        util_max: 90,
-        util_min: 0,
-        util_avg: 22,
-        power_max: 160,
-        power_min: 12,
-        power_avg: 60,
-        power_limit: 170,
+        gpu_name: 'NVIDIA RTX 3090',
+        sample_count: 1440,
+        idle_sample_count: 800,
+        peak_temp: 70,
+        peak_util: 90,
+        peak_power: 320,
+        avg_temp: 50,
+        avg_power: 110,
+        avg_util: 22,
+        idle_temp: 42,
+        idle_power: 30,
+        power_limit: 350,
       },
     ],
-    system_power: { total_max: 280, total_min: 150, total_avg: 210, source: 'estimated' },
+    system_power: {
+      sample_count: 1440,
+      peak_watts: 480,
+      avg_watts: 220,
+      peak_ac_watts: 522,
+      avg_ac_watts: 239,
+      source: 'estimated',
+    },
   },
   week: {
     gpus: [
       {
         gpu_index: 0,
-        gpu_name: 'NVIDIA RTX 3060',
-        temp_max: 75,
-        temp_min: 40,
-        temp_avg: 56,
-        util_max: 95,
-        util_min: 0,
-        util_avg: 24,
-        power_max: 165,
-        power_min: 10,
-        power_avg: 62,
-        power_limit: 170,
+        gpu_name: 'NVIDIA RTX 3090',
+        sample_count: 10080,
+        idle_sample_count: 5500,
+        peak_temp: 75,
+        peak_util: 95,
+        peak_power: 340,
+        avg_temp: 52,
+        avg_power: 115,
+        avg_util: 24,
+        idle_temp: 41,
+        idle_power: 28,
+        power_limit: 350,
       },
     ],
-    system_power: { total_max: 295, total_min: 145, total_avg: 215, source: 'estimated' },
+    system_power: {
+      sample_count: 10080,
+      peak_watts: 510,
+      avg_watts: 225,
+      peak_ac_watts: 554,
+      avg_ac_watts: 244,
+      source: 'estimated',
+    },
   },
   psu_watts: 750,
+}
+
+const SAMPLE_CURRENT = {
+  available: true,
+  vendor: 'nvidia',
+  gpus: [SAMPLE_GPU],
+  system_power: {
+    total_watts: 240,
+    ac_watts: 261,
+    cpu_watts: 45,
+    gpu_watts: 178.5,
+    baseline_watts: 65,
+    psu_efficiency: 0.92,
+    source: 'estimated',
+  },
+  psu_watts: 750,
+  psu_percent: 32,
+  thresholds: {
+    gpu_temp_warning: 80,
+    gpu_temp_critical: 90,
+    psu_warning_percent: 80,
+    psu_critical_percent: 95,
+  },
 }
 
 describe('GpuPanel', () => {
@@ -110,6 +170,12 @@ describe('GpuPanel', () => {
         system_power: { total_watts: null, source: 'unavailable' },
         psu_watts: 0,
         psu_percent: null,
+        thresholds: {
+          gpu_temp_warning: 80,
+          gpu_temp_critical: 90,
+          psu_warning_percent: 80,
+          psu_critical_percent: 95,
+        },
       },
       isLoading: false,
     })
@@ -118,47 +184,55 @@ describe('GpuPanel', () => {
       isLoading: false,
     })
     useGpuHistory.mockReturnValue({
-      data: { gpu_metrics: [], system_power: [] },
+      data: { gpu_metrics: [], system_power: [], sample_interval_seconds: 10 },
       isLoading: false,
     })
     render(React.createElement(GpuPanel), { wrapper })
     expect(screen.getByText(/No GPU detected/)).toBeInTheDocument()
   })
 
-  it('renders GPU stats and current power when data is available', () => {
-    useGpuCurrent.mockReturnValue({
-      data: {
-        available: true,
-        vendor: 'nvidia',
-        gpus: [SAMPLE_GPU],
-        system_power: {
-          total_watts: 220,
-          cpu_watts: 45,
-          gpu_watts: 78.5,
-          baseline_watts: 65,
-          source: 'estimated',
-        },
-        psu_watts: 750,
-        psu_percent: 29.3,
-      },
-      isLoading: false,
-    })
+  it('renders GPU detail tiles, hardware metadata, and system power breakdown', () => {
+    useGpuCurrent.mockReturnValue({ data: SAMPLE_CURRENT, isLoading: false })
     useGpuSummary.mockReturnValue({ data: SAMPLE_SUMMARY, isLoading: false })
     useGpuHistory.mockReturnValue({ data: SAMPLE_HISTORY, isLoading: false })
 
     render(React.createElement(GpuPanel), { wrapper })
+
     // Section headings
     expect(screen.getAllByText(/GPUs/).length).toBeGreaterThan(0)
     expect(screen.getByText(/System Power/)).toBeInTheDocument()
-    // GPU name (renders once in card header, once in chart legend)
-    expect(screen.getAllByText(/NVIDIA RTX 3060/).length).toBeGreaterThan(0)
-    // Current temp shown
-    expect(screen.getByText('55°C')).toBeInTheDocument()
-    // Power draw with unit (appears in both Now Power and gpu_watts cells)
-    expect(screen.getAllByText('78.5 W').length).toBeGreaterThan(0)
-    // System power total
-    expect(screen.getByText('220 W')).toBeInTheDocument()
-    // PSU note rendered with PSU watts
-    expect(screen.getByText(/750W PSU rail/)).toBeInTheDocument()
+    // GPU name (in card header + chart legend)
+    expect(screen.getAllByText(/NVIDIA RTX 3090/).length).toBeGreaterThan(0)
+    // Hardware-detail badges
+    expect(screen.getByText(/P2/)).toBeInTheDocument()
+    expect(screen.getByText(/PCIe 3x16/)).toBeInTheDocument()
+    expect(screen.getByText(/1500 MHz/)).toBeInTheDocument()
+    // Idle stats appear (peak vs idle distinction)
+    expect(screen.getByText(/Day Idle Power/)).toBeInTheDocument()
+    expect(screen.getByText(/Day Peak Power/)).toBeInTheDocument()
+    // Idle sample count surfaced so we know if idle data is meaningful
+    expect(screen.getByText(/800 idle samples/)).toBeInTheDocument()
+    // System power tiles include both DC and AC
+    expect(screen.getByText('Now Total (DC)')).toBeInTheDocument()
+    expect(screen.getByText('Now Total (AC)')).toBeInTheDocument()
+    // PSU subtitle / metadata appears (in subtitle and Now Total tile)
+    expect(screen.getAllByText(/750W PSU/).length).toBeGreaterThan(0)
+  })
+
+  it('shows per-GPU filter chips when more than one GPU is present', () => {
+    const TWO_GPUS = {
+      ...SAMPLE_CURRENT,
+      gpus: [
+        SAMPLE_GPU,
+        { ...SAMPLE_GPU, index: 1, name: 'GTX 1080', power_limit_w: 180 },
+      ],
+    }
+    useGpuCurrent.mockReturnValue({ data: TWO_GPUS, isLoading: false })
+    useGpuSummary.mockReturnValue({ data: SAMPLE_SUMMARY, isLoading: false })
+    useGpuHistory.mockReturnValue({ data: SAMPLE_HISTORY, isLoading: false })
+    render(React.createElement(GpuPanel), { wrapper })
+    expect(screen.getByRole('button', { name: 'GPU 0' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'GPU 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument()
   })
 })

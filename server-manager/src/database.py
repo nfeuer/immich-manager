@@ -83,6 +83,23 @@ MIGRATIONS: List[tuple] = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_system_power_timestamp ON system_power(timestamp)",
     ]),
+    # Version 5: GPU detail fields + AC wattage + alert-state persistence
+    (5, "add gpu detail columns, ac watts, alert_state", [
+        "ALTER TABLE gpu_metrics ADD COLUMN pstate TEXT",
+        "ALTER TABLE gpu_metrics ADD COLUMN fan_speed_percent REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN gfx_clock_mhz REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN mem_clock_mhz REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN pcie_gen REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN pcie_width REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN driver_version TEXT",
+        "ALTER TABLE system_power ADD COLUMN ac_watts REAL",
+        "ALTER TABLE system_power ADD COLUMN psu_efficiency REAL",
+        """CREATE TABLE IF NOT EXISTS alert_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+    ]),
 ]
 
 
@@ -432,8 +449,10 @@ class Database:
                 """INSERT INTO gpu_metrics (
                     gpu_index, gpu_uuid, gpu_name, vendor,
                     temperature_c, util_percent, mem_util_percent,
-                    mem_used_mb, mem_total_mb, power_draw_w, power_limit_w
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    mem_used_mb, mem_total_mb, power_draw_w, power_limit_w,
+                    pstate, fan_speed_percent, gfx_clock_mhz, mem_clock_mhz,
+                    pcie_gen, pcie_width, driver_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
                         g.get("index"),
@@ -447,6 +466,13 @@ class Database:
                         g.get("mem_total_mb"),
                         g.get("power_draw_w"),
                         g.get("power_limit_w"),
+                        g.get("pstate"),
+                        g.get("fan_speed_percent"),
+                        g.get("gfx_clock_mhz"),
+                        g.get("mem_clock_mhz"),
+                        g.get("pcie_gen"),
+                        g.get("pcie_width"),
+                        g.get("driver_version"),
                     )
                     for g in gpus
                 ],
@@ -458,15 +484,41 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 """INSERT INTO system_power
-                   (total_watts, cpu_watts, gpu_watts, baseline_watts, source)
-                   VALUES (?, ?, ?, ?, ?)""",
+                   (total_watts, cpu_watts, gpu_watts, baseline_watts, source,
+                    ac_watts, psu_efficiency)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     sample.get("total_watts"),
                     sample.get("cpu_watts"),
                     sample.get("gpu_watts"),
                     sample.get("baseline_watts"),
                     sample.get("source"),
+                    sample.get("ac_watts"),
+                    sample.get("psu_efficiency"),
                 ),
+            )
+
+    # ------------------------------------------------------------------ #
+    # Alert-state KV (persists transition state across service restarts)  #
+    # ------------------------------------------------------------------ #
+
+    def get_alert_state(self, key: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM alert_state WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row["value"] if row else None
+
+    def set_alert_state(self, key: str, value: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO alert_state (key, value, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (key, value),
             )
 
     def get_latest_gpu_metrics(self) -> List[Dict]:
@@ -519,11 +571,25 @@ class Database:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_gpu_summary(self, hours: int = 168) -> List[Dict]:
-        """Aggregate per-GPU min/max/avg for temp, util, and power.
+    # ``idle`` here = samples where the GPU was effectively doing nothing.
+    # 5% util is generous enough to include idle compositor work but excludes
+    # any meaningful workload.
+    _IDLE_UTIL_THRESHOLD = 5.0
 
-        ``idle`` is interpreted as the lowest observed power draw (i.e. when
-        the GPU is doing nothing) and the lowest observed temperature.
+    def get_gpu_summary(self, hours: int = 168) -> List[Dict]:
+        """Aggregate per-GPU peak vs. idle stats over a window.
+
+        Returns one row per GPU with:
+          - ``peak_*``: maximum observed temp / util / power
+          - ``idle_*``: average temp / power on samples where util < 5%
+            (or ``None`` if the GPU was never idle in the window)
+          - ``avg_*``: window-wide averages
+          - ``sample_count``: total samples in window
+          - ``idle_sample_count``: samples that met the idle threshold
+
+        Idle is computed as an average of low-utilization samples rather
+        than ``MIN()`` so transient dips (e.g. between two inference batches)
+        don't get reported as the idle baseline.
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -532,21 +598,32 @@ class Database:
                     gpu_index,
                     MAX(gpu_name) AS gpu_name,
                     MAX(vendor) AS vendor,
-                    MAX(temperature_c) AS temp_max,
-                    MIN(temperature_c) AS temp_min,
-                    AVG(temperature_c) AS temp_avg,
-                    MAX(util_percent) AS util_max,
-                    MIN(util_percent) AS util_min,
-                    AVG(util_percent) AS util_avg,
-                    MAX(power_draw_w) AS power_max,
-                    MIN(power_draw_w) AS power_min,
-                    AVG(power_draw_w) AS power_avg,
-                    MAX(power_limit_w) AS power_limit
+                    COUNT(*) AS sample_count,
+                    MAX(temperature_c) AS peak_temp,
+                    MAX(util_percent) AS peak_util,
+                    MAX(power_draw_w) AS peak_power,
+                    AVG(temperature_c) AS avg_temp,
+                    AVG(util_percent) AS avg_util,
+                    AVG(power_draw_w) AS avg_power,
+                    MAX(power_limit_w) AS power_limit,
+                    MAX(fan_speed_percent) AS peak_fan,
+                    -- Idle aggregates: AVG(...) FILTER (WHERE ...) gives us
+                    -- the per-GPU mean only over low-utilization samples.
+                    AVG(CASE WHEN util_percent < ?
+                            THEN temperature_c END) AS idle_temp,
+                    AVG(CASE WHEN util_percent < ?
+                            THEN power_draw_w END) AS idle_power,
+                    SUM(CASE WHEN util_percent < ? THEN 1 ELSE 0 END) AS idle_sample_count
                    FROM gpu_metrics
                    WHERE timestamp >= datetime('now', '-' || ? || ' hours')
                    GROUP BY gpu_index
                    ORDER BY gpu_index""",
-                (hours,),
+                (
+                    self._IDLE_UTIL_THRESHOLD,
+                    self._IDLE_UTIL_THRESHOLD,
+                    self._IDLE_UTIL_THRESHOLD,
+                    hours,
+                ),
             )
             return [dict(row) for row in cursor.fetchall()]
 
@@ -556,9 +633,11 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 """SELECT
-                    MAX(total_watts) AS total_max,
-                    MIN(total_watts) AS total_min,
-                    AVG(total_watts) AS total_avg,
+                    COUNT(*) AS sample_count,
+                    MAX(total_watts) AS peak_watts,
+                    AVG(total_watts) AS avg_watts,
+                    MAX(ac_watts) AS peak_ac_watts,
+                    AVG(ac_watts) AS avg_ac_watts,
                     MAX(source) AS source
                    FROM system_power
                    WHERE timestamp >= datetime('now', '-' || ? || ' hours')""",

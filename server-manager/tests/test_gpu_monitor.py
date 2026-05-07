@@ -32,8 +32,8 @@ def test_to_float_handles_units_and_na():
 
 
 NVIDIA_CSV = (
-    "0, GPU-1234, NVIDIA RTX 3060, 55, 22, 18, 4096, 12288, 78.5, 170\n"
-    "1, GPU-5678, NVIDIA RTX 3060, 60, 0, 0, 1024, 12288, 12.0, 170\n"
+    "0, GPU-1234, NVIDIA RTX 3060, 55, 22, 18, 4096, 12288, 78.5, 170, P2, 45, 1500, 7000, 3, 16, 550.54.14\n"
+    "1, GPU-5678, NVIDIA RTX 3060, 60, 0, 0, 1024, 12288, 12.0, 170, P8, 30, 210, 405, 3, 16, 550.54.14\n"
 )
 
 
@@ -68,8 +68,34 @@ def test_query_nvidia_parses_two_gpus(mock_which, mock_run):
     assert gpus[0]["power_draw_w"] == 78.5
     assert gpus[0]["power_limit_w"] == 170.0
     assert gpus[0]["mem_used_mb"] == 4096.0
+    assert gpus[0]["pstate"] == "P2"
+    assert gpus[0]["fan_speed_percent"] == 45.0
+    assert gpus[0]["gfx_clock_mhz"] == 1500.0
+    assert gpus[0]["pcie_gen"] == 3.0
+    assert gpus[0]["pcie_width"] == 16.0
+    assert gpus[0]["driver_version"] == "550.54.14"
     assert gpus[1]["index"] == 1
     assert gpus[1]["util_percent"] == 0.0
+    assert gpus[1]["pstate"] == "P8"
+
+
+@patch("src.gpu_monitor.subprocess.run")
+@patch("src.gpu_monitor.shutil.which")
+def test_query_nvidia_handles_old_driver_without_extra_fields(mock_which, mock_run):
+    """Drivers older than 470 don't return all the extra columns we ask for —
+    we should still parse the core 10 fields and degrade the rest to None."""
+    mock_which.side_effect = lambda c: "/usr/bin/nvidia-smi" if c == "nvidia-smi" else None
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="0, GPU-A, GTX 1080, 50, 10, 5, 1000, 8000, 90, 180\n",
+        stderr="",
+    )
+    gm = GpuMonitor()
+    gpus = gm.query()
+    assert len(gpus) == 1
+    assert gpus[0]["temperature_c"] == 50.0
+    assert gpus[0]["pstate"] is None
+    assert gpus[0]["fan_speed_percent"] is None
 
 
 @patch("src.gpu_monitor.subprocess.run")
@@ -129,6 +155,7 @@ def test_query_amd(mock_which, mock_run):
     assert g["util_percent"] == 30.0
     assert g["power_draw_w"] == 120.0
     assert g["vendor"] == "amd"
+    assert g["pstate"] is None  # AMD path doesn't set pstate
 
 
 # ---------------------------------------------------------------------------
@@ -138,28 +165,33 @@ def test_query_amd(mock_which, mock_run):
 
 def test_system_power_no_data_returns_unavailable():
     spm = SystemPowerMonitor(baseline_watts=70)
-    spm._rapl_paths = []  # no RAPL
+    spm._rapl_paths = []
+    spm._hwmon_power_path = None
     with patch("src.gpu_monitor.shutil.which", return_value=None):
         result = spm.read([])
     assert result["source"] == "unavailable"
     assert result["total_watts"] is None
+    assert result["ac_watts"] is None
 
 
-def test_system_power_estimated_with_gpu_only():
-    spm = SystemPowerMonitor(baseline_watts=70)
+def test_system_power_estimated_includes_ac_watts():
+    spm = SystemPowerMonitor(baseline_watts=70, psu_efficiency=0.92)
     spm._rapl_paths = []
+    spm._hwmon_power_path = None
     with patch("src.gpu_monitor.shutil.which", return_value=None):
         result = spm.read([{"power_draw_w": 100.0}, {"power_draw_w": 80.0}])
     assert result["source"] == "estimated"
     # 70 baseline + 180 GPUs, no CPU sample available
     assert result["total_watts"] == pytest.approx(250.0)
-    assert result["gpu_watts"] == pytest.approx(180.0)
-    assert result["cpu_watts"] is None
+    # AC = DC / efficiency ≈ 271.7 W
+    assert result["ac_watts"] == pytest.approx(250.0 / 0.92)
+    assert result["psu_efficiency"] == 0.92
 
 
-def test_system_power_ipmi_overrides_estimate(tmp_path):
-    spm = SystemPowerMonitor(baseline_watts=70)
+def test_system_power_ipmi_applies_psu_efficiency():
+    spm = SystemPowerMonitor(baseline_watts=70, psu_efficiency=0.92)
     spm._rapl_paths = []
+    spm._hwmon_power_path = None
 
     ipmi_output = (
         "Instantaneous power reading:                   215 Watts\n"
@@ -174,7 +206,28 @@ def test_system_power_ipmi_overrides_estimate(tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout=ipmi_output, stderr="")
         result = spm.read([{"power_draw_w": 100.0}])
     assert result["source"] == "ipmi"
-    assert result["total_watts"] == 215.0
+    # AC reading preserved as-is
+    assert result["ac_watts"] == 215.0
+    # DC = AC * efficiency
+    assert result["total_watts"] == pytest.approx(215.0 * 0.92)
+
+
+def test_system_power_hwmon_fallback(tmp_path):
+    # Simulate a board exposing PSU input through hwmon's power1_input.
+    hw = tmp_path / "hwmon0"
+    hw.mkdir()
+    p = hw / "power1_input"
+    p.write_text("180000000")  # 180 W in microwatts
+
+    spm = SystemPowerMonitor(baseline_watts=70, psu_efficiency=0.92)
+    spm._rapl_paths = []
+    spm._hwmon_power_path = p
+
+    with patch("src.gpu_monitor.shutil.which", return_value=None):
+        result = spm.read([{"power_draw_w": 100.0}])
+    assert result["source"] == "hwmon"
+    assert result["ac_watts"] == 180.0
+    assert result["total_watts"] == pytest.approx(180.0 * 0.92)
 
 
 def test_system_power_rapl_delta(tmp_path):

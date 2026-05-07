@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 _NVIDIA_QUERY_FIELDS = (
     "index,uuid,name,temperature.gpu,utilization.gpu,utilization.memory,"
-    "memory.used,memory.total,power.draw,power.limit"
+    "memory.used,memory.total,power.draw,power.limit,"
+    "pstate,fan.speed,clocks.current.graphics,clocks.current.memory,"
+    "pcie.link.gen.current,pcie.link.width.current,driver_version"
 )
 
 
@@ -99,6 +101,14 @@ class GpuMonitor:
                     "mem_total_mb": _to_float(parts[7]),
                     "power_draw_w": _to_float(parts[8]),
                     "power_limit_w": _to_float(parts[9]),
+                    # Optional newer fields — degrade gracefully on older drivers.
+                    "pstate": parts[10] if len(parts) > 10 and parts[10] not in ("", "[N/A]") else None,
+                    "fan_speed_percent": _to_float(parts[11]) if len(parts) > 11 else None,
+                    "gfx_clock_mhz": _to_float(parts[12]) if len(parts) > 12 else None,
+                    "mem_clock_mhz": _to_float(parts[13]) if len(parts) > 13 else None,
+                    "pcie_gen": _to_float(parts[14]) if len(parts) > 14 else None,
+                    "pcie_width": _to_float(parts[15]) if len(parts) > 15 else None,
+                    "driver_version": parts[16] if len(parts) > 16 and parts[16] not in ("", "[N/A]") else None,
                     "vendor": "nvidia",
                 }
             except (ValueError, IndexError) as exc:
@@ -153,6 +163,13 @@ class GpuMonitor:
                 "mem_total_mb": None,
                 "power_draw_w": _to_float(info.get("Average Graphics Package Power (W)")),
                 "power_limit_w": _to_float(info.get("Max Graphics Package Power (W)")),
+                "pstate": None,
+                "fan_speed_percent": _to_float(info.get("Fan speed (%)")),
+                "gfx_clock_mhz": None,
+                "mem_clock_mhz": None,
+                "pcie_gen": None,
+                "pcie_width": None,
+                "driver_version": None,
                 "vendor": "amd",
             })
         return gpus
@@ -197,10 +214,21 @@ class SystemPowerMonitor:
     """Estimate total system wall power draw.
 
     Strategy, in order of preference:
-      1. IPMI DCMI power reading (``ipmitool dcmi power reading``) — exact
-         input wattage from the BMC when available.
-      2. Sum of CPU package power (Intel RAPL) + GPU draw + configurable
+      1. IPMI DCMI power reading (``ipmitool dcmi power reading``) — AC
+         input wattage from the BMC when available. Server motherboards
+         only; rare on desktop boards.
+      2. ``hwmon`` ``power1_input`` — some boards (Supermicro, ASRock Rack,
+         a few Gigabyte/ASUS server boards) expose PSU input via an ITE
+         or Nuvoton sensor in microwatts.
+      3. Sum of CPU package power (Intel RAPL) + GPU draw + configurable
          baseline wattage for motherboard / drives / fans.
+
+    PSU efficiency:
+      ``total_watts`` is reported in **DC watts** (component sum, what
+      your PSU must supply on its rails). When the source is IPMI/hwmon
+      we read AC input and multiply by ``psu_efficiency`` to convert.
+      ``ac_watts`` is also reported when known so the dashboard can
+      display both.
 
     The RAPL read computes a delta in joules between two timestamps to
     derive watts. The first call after construction returns ``None`` for
@@ -208,11 +236,19 @@ class SystemPowerMonitor:
     """
 
     RAPL_ROOT = Path("/sys/class/powercap")
+    HWMON_ROOT = Path("/sys/class/hwmon")
 
-    def __init__(self, baseline_watts: float = 65.0, ipmitool: str = "ipmitool"):
+    def __init__(
+        self,
+        baseline_watts: float = 65.0,
+        psu_efficiency: float = 0.92,
+        ipmitool: str = "ipmitool",
+    ):
         self.baseline_watts = baseline_watts
+        self.psu_efficiency = max(0.5, min(1.0, psu_efficiency))
         self.ipmitool = ipmitool
         self._rapl_paths = self._find_rapl_packages()
+        self._hwmon_power_path = self._find_hwmon_power_input()
         self._last_rapl_uj: Optional[int] = None
         self._last_rapl_ts: Optional[float] = None
 
@@ -228,6 +264,40 @@ class SystemPowerMonitor:
                 if (p / "energy_uj").exists():
                     paths.append(p)
         return paths
+
+    @classmethod
+    def _find_hwmon_power_input(cls) -> Optional[Path]:
+        """Find a ``power1_input`` (microwatts) under hwmon, if any.
+
+        Some server-grade boards expose total board / PSU input wattage here.
+        Most desktop boards don't, in which case we get None and fall back to
+        the RAPL+component estimate.
+        """
+        if not cls.HWMON_ROOT.exists():
+            return None
+        for hw in sorted(cls.HWMON_ROOT.iterdir()):
+            power_input = hw / "power1_input"
+            if not power_input.exists():
+                continue
+            # Sanity-read; some modules return permission errors at boot.
+            try:
+                int(power_input.read_text().strip())
+            except (OSError, ValueError):
+                continue
+            return power_input
+        return None
+
+    def _read_hwmon_watts(self) -> Optional[float]:
+        if not self._hwmon_power_path:
+            return None
+        try:
+            uw = int(self._hwmon_power_path.read_text().strip())
+        except (OSError, ValueError):
+            return None
+        # Ignore zero — common when the sensor is present but unreadable.
+        if uw <= 0:
+            return None
+        return uw / 1_000_000.0
 
     def _read_ipmi_watts(self) -> Optional[float]:
         if not shutil.which(self.ipmitool):
@@ -284,34 +354,52 @@ class SystemPowerMonitor:
         return (delta_uj / 1_000_000.0) / elapsed
 
     def read(self, gpus: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Compute current system power draw given a list of GPU snapshots."""
-        gpu_watts = sum((g.get("power_draw_w") or 0.0) for g in gpus) or None
+        """Compute current system power draw given a list of GPU snapshots.
 
-        ipmi_watts = self._read_ipmi_watts()
-        if ipmi_watts is not None:
-            return {
-                "total_watts": ipmi_watts,
-                "source": "ipmi",
-                "cpu_watts": self._read_cpu_watts(),
-                "gpu_watts": gpu_watts,
-                "baseline_watts": self.baseline_watts,
-            }
-
+        Returns:
+          - ``total_watts``: DC component sum, comparable to PSU rating
+          - ``ac_watts``: AC wall power (when measured), or estimated from
+            DC components / efficiency. ``None`` if neither.
+          - ``cpu_watts`` / ``gpu_watts`` / ``baseline_watts``: components
+          - ``source``: ``ipmi`` | ``hwmon`` | ``estimated`` | ``unavailable``
+        """
+        gpu_watts = sum((g.get("power_draw_w") or 0.0) for g in gpus) if gpus else None
         cpu_watts = self._read_cpu_watts()
-        components = [w for w in (cpu_watts, gpu_watts) if w is not None]
-        if not components and cpu_watts is None and gpu_watts is None:
+
+        # Authoritative AC sources (from BMC or board sensor).
+        for source, ac_reader in (("ipmi", self._read_ipmi_watts), ("hwmon", self._read_hwmon_watts)):
+            ac = ac_reader()
+            if ac is not None:
+                return {
+                    "total_watts": ac * self.psu_efficiency,  # AC → DC
+                    "ac_watts": ac,
+                    "source": source,
+                    "cpu_watts": cpu_watts,
+                    "gpu_watts": gpu_watts,
+                    "baseline_watts": self.baseline_watts,
+                    "psu_efficiency": self.psu_efficiency,
+                }
+
+        if cpu_watts is None and not gpu_watts:
             return {
                 "total_watts": None,
+                "ac_watts": None,
                 "source": "unavailable",
                 "cpu_watts": None,
                 "gpu_watts": None,
                 "baseline_watts": self.baseline_watts,
+                "psu_efficiency": self.psu_efficiency,
             }
-        total = (cpu_watts or 0.0) + (gpu_watts or 0.0) + self.baseline_watts
+
+        total_dc = (cpu_watts or 0.0) + (gpu_watts or 0.0) + self.baseline_watts
         return {
-            "total_watts": total,
+            "total_watts": total_dc,
+            # Estimated AC: DC / efficiency (you draw more from the wall than
+            # your components consume).
+            "ac_watts": total_dc / self.psu_efficiency if self.psu_efficiency > 0 else None,
             "source": "estimated",
             "cpu_watts": cpu_watts,
             "gpu_watts": gpu_watts,
             "baseline_watts": self.baseline_watts,
+            "psu_efficiency": self.psu_efficiency,
         }

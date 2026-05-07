@@ -55,8 +55,14 @@ class MonitoringConfig(BaseModel):
     """Monitoring configuration"""
     disk_check_interval: int = 300  # seconds
     metrics_interval: int = 60  # seconds
-    gpu_check_interval: int = 60  # seconds; per-GPU temp/util/power sampling
+    # GPU sampling — 10 s catches transient PSU spikes that 60 s misses,
+    # at the cost of ~1 % of one CPU core spawning nvidia-smi.
+    gpu_check_interval: int = 10  # seconds; per-GPU temp/util/power sampling
     system_power_baseline_watts: float = 65.0  # mobo + drives + fans estimate
+    # PSU efficiency for AC↔DC conversion. Used to convert AC readings (IPMI /
+    # hwmon) to DC component watts, and to estimate AC wall power from a
+    # component sum. Corsair RMx Platinum at typical loads sits around 0.92.
+    psu_efficiency: float = 0.92
 
 
 class ThresholdsConfig(BaseModel):
