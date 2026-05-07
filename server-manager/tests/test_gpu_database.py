@@ -126,6 +126,57 @@ def test_system_power_roundtrip(tmp_path):
     assert summary["peak_ac_watts"] == 233.7
 
 
+def test_baseline_calibration_returns_residual_median(tmp_path):
+    db = Database(db_path=str(tmp_path / "test.db"))
+    # Three idle samples (no GPU activity) — residual = total - cpu - gpu
+    # 200-30-50=120, 220-40-60=120, 230-45-65=120 → median 120
+    samples = [
+        {"total_watts": 200, "cpu_watts": 30, "gpu_watts": 50,
+         "baseline_watts": 65, "source": "estimated", "ac_watts": 217, "psu_efficiency": 0.92},
+        {"total_watts": 220, "cpu_watts": 40, "gpu_watts": 60,
+         "baseline_watts": 65, "source": "estimated", "ac_watts": 239, "psu_efficiency": 0.92},
+        {"total_watts": 230, "cpu_watts": 45, "gpu_watts": 65,
+         "baseline_watts": 65, "source": "estimated", "ac_watts": 250, "psu_efficiency": 0.92},
+    ]
+    for s in samples:
+        db.record_system_power(s)
+
+    # No gpu_metrics inserted → "every GPU was idle" predicate is vacuously true.
+    result = db.get_baseline_calibration(hours=24)
+    assert result["sample_count"] == 3
+    assert result["recommended_baseline_watts"] == 120.0
+    assert result["min_residual"] == 120.0
+    assert result["max_residual"] == 120.0
+
+
+def test_baseline_calibration_excludes_loaded_samples(tmp_path):
+    db = Database(db_path=str(tmp_path / "test.db"))
+    # Insert one system_power + matching busy GPU sample at the same timestamp.
+    # The calibration must skip this sample because util >= 5%.
+    with db._get_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO system_power (timestamp, total_watts, cpu_watts, gpu_watts, "
+            "baseline_watts, source) VALUES (?, ?, ?, ?, ?, ?)",
+            ("2026-05-07 12:00:00", 400, 50, 200, 65, "estimated"),
+        )
+        c.execute(
+            "INSERT INTO system_power (timestamp, total_watts, cpu_watts, gpu_watts, "
+            "baseline_watts, source) VALUES (?, ?, ?, ?, ?, ?)",
+            ("2026-05-07 13:00:00", 200, 30, 50, 65, "estimated"),
+        )
+        c.execute(
+            "INSERT INTO gpu_metrics (timestamp, gpu_index, util_percent, power_draw_w) "
+            "VALUES (?, ?, ?, ?)",
+            ("2026-05-07 12:00:00", 0, 80, 200),
+        )
+
+    result = db.get_baseline_calibration(hours=999999)
+    # Only the 13:00 sample has no busy GPU row.
+    assert result["sample_count"] == 1
+    assert result["recommended_baseline_watts"] == 120.0
+
+
 def test_alert_state_persistence(tmp_path):
     db = Database(db_path=str(tmp_path / "test.db"))
     assert db.get_alert_state("gpu_temp_0") is None

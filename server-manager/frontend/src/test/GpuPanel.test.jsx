@@ -8,6 +8,7 @@ vi.mock('../hooks/useDashboard.js', () => ({
   useGpuCurrent: vi.fn(),
   useGpuSummary: vi.fn(),
   useGpuHistory: vi.fn(),
+  useBaselineCalibration: vi.fn(() => ({ data: undefined, isLoading: false, refetch: vi.fn() })),
 }))
 
 import {

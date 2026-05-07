@@ -432,23 +432,27 @@ async def check_disk_health_job():
             # Record to database
             database.record_disk_health(disk['device'], disk)
 
-            # Check thresholds and send alerts
-            if disk.get('temperature') and disk['temperature'] > config.thresholds.disk_temp_critical:
+            # Drive-type-aware temperature thresholds. Without this,
+            # NVMe drives running normally at 55°C would trip the 45°C
+            # HDD warning every cycle.
+            drive_type = disk.get('drive_type', 'hdd')
+            warn, crit = config.thresholds.temp_thresholds_for(drive_type)
+            temp = disk.get('temperature')
+            if temp and temp > crit:
                 await alert_manager.send_alert(
                     f"Critical Temperature: {disk['device']}",
-                    f"Temperature: {disk['temperature']}°C (Critical: {config.thresholds.disk_temp_critical}°C)",
+                    f"{drive_type.upper()} {disk['device']} at {temp}°C (critical: {crit}°C)",
                     "critical"
                 )
                 database.record_alert(
                     "critical",
                     "disk_health",
-                    f"Critical temperature on {disk['device']}: {disk['temperature']}°C"
+                    f"Critical {drive_type} temperature on {disk['device']}: {temp}°C"
                 )
-
-            elif disk.get('temperature') and disk['temperature'] > config.thresholds.disk_temp_warning:
+            elif temp and temp > warn:
                 await alert_manager.send_alert(
                     f"High Temperature: {disk['device']}",
-                    f"Temperature: {disk['temperature']}°C (Warning: {config.thresholds.disk_temp_warning}°C)",
+                    f"{drive_type.upper()} {disk['device']} at {temp}°C (warning: {warn}°C)",
                     "warning"
                 )
 
@@ -873,6 +877,29 @@ async def get_gpu_history(
         "gpu_metrics": database.get_gpu_history(hours=hours, gpu_index=gpu_index),
         "system_power": database.get_system_power_history(hours=hours),
     }
+
+
+@app.get("/api/gpu/calibrate-baseline")
+@limiter.limit("10/minute")
+async def calibrate_baseline(
+    request: Request, hours: int = 24, user: Dict = Depends(require_admin)
+):
+    """Suggest a ``system_power_baseline_watts`` value from recent idle data.
+
+    Computes ``total - cpu - gpu_sum`` over samples where every GPU is
+    below 5% utilization. The median of those residuals is the
+    recommended baseline. Only meaningful after a few hours of data
+    that include genuinely-idle moments — e.g. overnight.
+    """
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    hours = max(1, min(hours, 24 * 7))
+    result = database.get_baseline_calibration(hours=hours)
+    result["hours"] = hours
+    result["current_baseline_watts"] = (
+        config.monitoring.system_power_baseline_watts if config else None
+    )
+    return result
 
 
 @app.get("/api/gpu/summary")

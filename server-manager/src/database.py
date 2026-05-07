@@ -100,6 +100,10 @@ MIGRATIONS: List[tuple] = [
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )""",
     ]),
+    # Version 6: Drive-type column for per-type temperature thresholds
+    (6, "add drive_type to disk_health", [
+        "ALTER TABLE disk_health ADD COLUMN drive_type TEXT",
+    ]),
 ]
 
 
@@ -263,12 +267,13 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO disk_health (
-                    device, smart_status, temperature, power_on_hours,
+                    device, drive_type, smart_status, temperature, power_on_hours,
                     power_cycle_count, reallocated_sectors, pending_sectors,
                     uncorrectable_sectors, raw_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 device,
+                data.get('drive_type'),
                 data.get('smart_status'),
                 data.get('temperature'),
                 data.get('power_on_hours'),
@@ -626,6 +631,62 @@ class Database:
                 ),
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_baseline_calibration(self, hours: int = 24) -> Dict[str, Any]:
+        """Suggest a baseline_watts value from observed idle samples.
+
+        Joins ``system_power`` with the same-bucket ``gpu_metrics`` to find
+        moments when both CPU and all GPUs were idle (low utilization),
+        then returns the average of (total - cpu - gpu_sum) on those
+        samples. That's the residual non-CPU/GPU draw — i.e. mobo +
+        drives + fans — which is exactly the baseline we want.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Pull recent system_power samples and join with the lowest-util
+            # GPU snapshot for each timestamp. We approximate "all GPUs idle"
+            # as the per-timestamp max of util_percent < 5; if you have only
+            # one GPU it's exact, with two GPUs both must be idle.
+            cursor.execute(
+                """SELECT
+                    sp.cpu_watts AS cpu_watts,
+                    sp.gpu_watts AS gpu_watts,
+                    sp.total_watts AS total_watts,
+                    sp.timestamp AS ts
+                   FROM system_power sp
+                   WHERE sp.timestamp >= datetime('now', '-' || ? || ' hours')
+                     AND sp.cpu_watts IS NOT NULL
+                     AND sp.gpu_watts IS NOT NULL
+                     AND sp.total_watts IS NOT NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM gpu_metrics gm
+                       WHERE gm.timestamp = sp.timestamp
+                         AND gm.util_percent >= 5
+                     )""",
+                (hours,),
+            )
+            rows = cursor.fetchall()
+            residuals = [
+                row["total_watts"] - (row["cpu_watts"] or 0) - (row["gpu_watts"] or 0)
+                for row in rows
+            ]
+            if not residuals:
+                return {
+                    "sample_count": 0,
+                    "recommended_baseline_watts": None,
+                    "min_residual": None,
+                    "median_residual": None,
+                    "max_residual": None,
+                }
+            residuals.sort()
+            median = residuals[len(residuals) // 2]
+            return {
+                "sample_count": len(residuals),
+                "recommended_baseline_watts": round(median, 1),
+                "min_residual": round(residuals[0], 1),
+                "median_residual": round(median, 1),
+                "max_residual": round(residuals[-1], 1),
+            }
 
     def get_system_power_summary(self, hours: int = 168) -> Dict[str, Any]:
         """Aggregate system power totals over a window."""

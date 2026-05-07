@@ -68,9 +68,20 @@ class DiskMonitor:
 
             data = json.loads(result.stdout)
 
+            # Drive-type detection. Used by callers to apply
+            # type-appropriate temperature thresholds — NVMe drives
+            # commonly run 50–65°C under load, SSDs 30–55°C, HDDs 30–45°C.
+            if device.startswith('/dev/nvme'):
+                drive_type = 'nvme'
+            elif data.get('rotation_rate', 0) == 0:
+                drive_type = 'ssd'
+            else:
+                drive_type = 'hdd'
+
             # Extract key metrics
             health = {
                 'device': device,
+                'drive_type': drive_type,
                 'smart_status': data.get('smart_status', {}).get('passed', False),
                 'model': data.get('model_name', 'Unknown'),
                 'serial': data.get('serial_number', 'Unknown'),

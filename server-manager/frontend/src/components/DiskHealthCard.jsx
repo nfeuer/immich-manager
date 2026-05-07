@@ -39,6 +39,11 @@ export default function DiskHealthCard() {
               <div className="flex items-center gap-1.5 min-w-0">
                 <CircleStackIcon className="w-3.5 h-3.5 text-immich-muted flex-shrink-0" />
                 <span className="text-xs font-mono text-immich-text truncate">{disk.device}</span>
+                {disk.drive_type && (
+                  <span className="text-[10px] uppercase text-immich-muted/70 font-mono">
+                    {disk.drive_type}
+                  </span>
+                )}
                 {disk.temperature != null && (
                   <span className="text-xs text-immich-muted ml-1">{Number(disk.temperature)}°C</span>
                 )}

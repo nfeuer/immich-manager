@@ -58,7 +58,14 @@ class MonitoringConfig(BaseModel):
     # GPU sampling — 10 s catches transient PSU spikes that 60 s misses,
     # at the cost of ~1 % of one CPU core spawning nvidia-smi.
     gpu_check_interval: int = 10  # seconds; per-GPU temp/util/power sampling
-    system_power_baseline_watts: float = 65.0  # mobo + drives + fans estimate
+    # Default baseline assumes a typical desktop with a few drives and fans.
+    # Itemized estimate for a Z170/Z270-class Gigabyte board with 1 NVMe +
+    # 1 SSD + 3 HDDs spinning + 2-3 case fans:
+    #   mobo/chipset/RAM ~35W + NVMe ~3W + 3 HDDs idle ~24W +
+    #   SSD ~1W + fans ~8W ≈ 71W (rounded to 75 to cover spin-up margin).
+    # Run /api/gpu/calibrate-baseline after a few minutes of GPU-idle data
+    # to get a measured value tailored to your exact hardware.
+    system_power_baseline_watts: float = 75.0
     # PSU efficiency for AC↔DC conversion. Used to convert AC readings (IPMI /
     # hwmon) to DC component watts, and to estimate AC wall power from a
     # component sum. Corsair RMx Platinum at typical loads sits around 0.92.
@@ -66,9 +73,19 @@ class MonitoringConfig(BaseModel):
 
 
 class ThresholdsConfig(BaseModel):
-    """Alert thresholds"""
+    """Alert thresholds.
+
+    Per-drive-type temperature thresholds: HDDs run cool (warn 45°C), SSDs
+    run warmer (warn 60°C), NVMe drives run hottest and throttle in the
+    75–85°C range, so warning at 45°C would fire constantly.
+    """
+    # Legacy generic disk thresholds — used as the HDD defaults.
     disk_temp_warning: int = 45
     disk_temp_critical: int = 50
+    ssd_temp_warning: int = 60
+    ssd_temp_critical: int = 70
+    nvme_temp_warning: int = 70
+    nvme_temp_critical: int = 80
     disk_space_warning: int = 85
     disk_space_critical: int = 95
     gpu_temp_warning: int = 80
@@ -76,6 +93,14 @@ class ThresholdsConfig(BaseModel):
     psu_watts: int = 0  # 0 disables PSU headroom alerts
     psu_warning_percent: int = 80
     psu_critical_percent: int = 95
+
+    def temp_thresholds_for(self, drive_type: str) -> tuple[int, int]:
+        """Return (warning, critical) °C for a given drive type."""
+        if drive_type == 'nvme':
+            return self.nvme_temp_warning, self.nvme_temp_critical
+        if drive_type == 'ssd':
+            return self.ssd_temp_warning, self.ssd_temp_critical
+        return self.disk_temp_warning, self.disk_temp_critical
 
 
 class QuietHoursConfig(BaseModel):

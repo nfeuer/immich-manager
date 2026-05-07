@@ -47,6 +47,18 @@ export function useGpuHistory(hours = 168) {
   })
 }
 
+export function useBaselineCalibration(enabled = false) {
+  // On-demand only — calibration is an admin "show me a recommendation"
+  // action, not something to poll.
+  return useQuery({
+    queryKey: ['gpu-calibrate'],
+    queryFn: () => fetcher('/api/gpu/calibrate-baseline?hours=24'),
+    enabled,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  })
+}
+
 // Returns the most recent dataUpdatedAt across all four polling queries.
 // Uses a cache subscription so consumers re-render when any query updates.
 export function useLastRefreshed() {

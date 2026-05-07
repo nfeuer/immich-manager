@@ -11,6 +11,7 @@ import {
   useGpuCurrent,
   useGpuSummary,
   useGpuHistory,
+  useBaselineCalibration,
 } from '../hooks/useDashboard.js'
 import LineChart from './LineChart.jsx'
 import Skeleton from './Skeleton.jsx'
@@ -370,6 +371,88 @@ function Section({ title, icon: Icon, children, action, subtitle }) {
   )
 }
 
+function BaselineCalibration({ baselineWatts }) {
+  const [requested, setRequested] = useState(false)
+  const { data, isLoading, refetch } = useBaselineCalibration(requested)
+
+  const onClick = () => {
+    if (!requested) setRequested(true)
+    else refetch()
+  }
+
+  return (
+    <div className="mt-3 p-3 border border-immich-border rounded-lg">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <div className="text-xs font-semibold text-immich-text">
+          Baseline calibration
+          <span className="ml-2 text-immich-muted font-normal font-mono">
+            current: {baselineWatts != null ? `${baselineWatts}W` : '—'}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClick}
+          className="px-3 py-1 text-xs font-medium rounded-md bg-immich-primary text-white hover:bg-immich-primary-hover disabled:opacity-50"
+          disabled={isLoading}
+        >
+          {isLoading ? 'Computing…' : requested ? 'Recompute' : 'Recommend'}
+        </button>
+      </div>
+      <p className="text-[11px] text-immich-muted">
+        Averages <code className="font-mono">total − cpu − gpu</code> over the last 24 h of
+        samples where every GPU was below 5% util. The result is your real motherboard +
+        drives + fans wattage. Run after a quiet period (overnight is ideal).
+      </p>
+      {data && (
+        <div className="mt-2 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
+          <div>
+            <span className="text-immich-muted">samples</span>{' '}
+            <span className="text-immich-text">{data.sample_count}</span>
+          </div>
+          <div>
+            <span className="text-immich-muted">min</span>{' '}
+            <span className="text-immich-text">{fmtNum(data.min_residual, 'W', 1)}</span>
+          </div>
+          <div>
+            <span className="text-immich-muted">median</span>{' '}
+            <span className="text-immich-success">
+              {fmtNum(data.median_residual, 'W', 1)}
+            </span>
+          </div>
+          <div>
+            <span className="text-immich-muted">max</span>{' '}
+            <span className="text-immich-text">{fmtNum(data.max_residual, 'W', 1)}</span>
+          </div>
+          {data.recommended_baseline_watts != null && (
+            <div className="col-span-full text-[11px] text-immich-muted mt-1">
+              Suggested:{' '}
+              <code className="font-mono text-immich-text">
+                system_power_baseline_watts: {data.recommended_baseline_watts}
+              </code>
+              {baselineWatts != null && (
+                <>
+                  {' '}
+                  (currently {baselineWatts}W,{' '}
+                  {Math.abs(data.recommended_baseline_watts - baselineWatts) < 5
+                    ? 'close enough — no change needed'
+                    : 'consider updating config.yaml'}
+                  )
+                </>
+              )}
+            </div>
+          )}
+          {data.sample_count === 0 && (
+            <div className="col-span-full text-[11px] text-immich-warning mt-1">
+              No idle samples found yet. Need at least one moment where every GPU was
+              under 5% util in the last 24 h.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function GpuPanel() {
   const [hours, setHours] = useState(168)
   const [gpuFilter, setGpuFilter] = useState('all')
@@ -638,6 +721,7 @@ export default function GpuPanel() {
               </p>
             )}
           </div>
+          <BaselineCalibration baselineWatts={current?.system_power?.baseline_watts} />
         </div>
       </Section>
     </>
