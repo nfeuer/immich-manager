@@ -96,12 +96,21 @@ auto_update:
 monitoring:
   disk_check_interval: 300  # 5 minutes
   metrics_interval: 60      # 1 minute
+  gpu_check_interval: 60    # 1 minute — temp/util/power per GPU
+  system_power_baseline_watts: 65.0  # mobo + drives + fans (used when IPMI unavailable)
 
 thresholds:
   disk_temp_warning: 45
   disk_temp_critical: 50
   disk_space_warning: 85
   disk_space_critical: 95
+  gpu_temp_warning: 80
+  gpu_temp_critical: 90
+  # PSU headroom alerts. Set psu_watts to your PSU's rated wattage to enable.
+  # Useful for dual-GPU builds where total draw must stay below the rail.
+  psu_watts: 0           # 0 disables — set to e.g. 750 for a 750W PSU
+  psu_warning_percent: 80
+  psu_critical_percent: 95
 
 auth:
   default_role: "user"  # Role assigned to new users: "admin", "user", or "guest"

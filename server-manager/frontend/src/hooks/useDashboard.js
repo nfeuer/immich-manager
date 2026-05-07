@@ -22,6 +22,31 @@ export function useAlerts() {
   return useQuery({ queryKey: ['alerts'], queryFn: () => fetcher('/api/alerts') })
 }
 
+export function useGpuCurrent() {
+  // Live snapshot — refresh aggressively so you can watch the numbers move.
+  return useQuery({
+    queryKey: ['gpu-current'],
+    queryFn: () => fetcher('/api/gpu/current'),
+    refetchInterval: 5000,
+  })
+}
+
+export function useGpuSummary() {
+  return useQuery({
+    queryKey: ['gpu-summary'],
+    queryFn: () => fetcher('/api/gpu/summary'),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useGpuHistory(hours = 168) {
+  return useQuery({
+    queryKey: ['gpu-history', hours],
+    queryFn: () => fetcher(`/api/gpu/history?hours=${hours}`),
+    refetchInterval: 60_000,
+  })
+}
+
 // Returns the most recent dataUpdatedAt across all four polling queries.
 // Uses a cache subscription so consumers re-render when any query updates.
 export function useLastRefreshed() {

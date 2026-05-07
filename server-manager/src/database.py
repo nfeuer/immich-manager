@@ -53,6 +53,36 @@ MIGRATIONS: List[tuple] = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_update_history_started_at ON update_history(started_at)",
     ]),
+    # Version 4: GPU and system power tracking
+    (4, "add gpu_metrics and system_power tables", [
+        """CREATE TABLE IF NOT EXISTS gpu_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            gpu_index INTEGER NOT NULL,
+            gpu_uuid TEXT,
+            gpu_name TEXT,
+            vendor TEXT,
+            temperature_c REAL,
+            util_percent REAL,
+            mem_util_percent REAL,
+            mem_used_mb REAL,
+            mem_total_mb REAL,
+            power_draw_w REAL,
+            power_limit_w REAL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_gpu_metrics_timestamp ON gpu_metrics(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_gpu_metrics_index_ts ON gpu_metrics(gpu_index, timestamp)",
+        """CREATE TABLE IF NOT EXISTS system_power (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            total_watts REAL,
+            cpu_watts REAL,
+            gpu_watts REAL,
+            baseline_watts REAL,
+            source TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_system_power_timestamp ON system_power(timestamp)",
+    ]),
 ]
 
 
@@ -375,7 +405,167 @@ class Database:
                 WHERE timestamp < datetime('now', '-' || ? || ' days')
             """, (days,))
 
+            # GPU history is high-volume (per-minute per-GPU); cap independently at 14 days
+            # so the 7-day dashboard window always has full coverage with a buffer.
+            cursor.execute("""
+                DELETE FROM gpu_metrics
+                WHERE timestamp < datetime('now', '-14 days')
+            """)
+            cursor.execute("""
+                DELETE FROM system_power
+                WHERE timestamp < datetime('now', '-14 days')
+            """)
+
             # Keep all backups and alerts history
+
+    # ------------------------------------------------------------------ #
+    # GPU + system power helpers                                          #
+    # ------------------------------------------------------------------ #
+
+    def record_gpu_metrics(self, gpus: List[Dict[str, Any]]) -> None:
+        """Insert one row per GPU snapshot."""
+        if not gpus:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                """INSERT INTO gpu_metrics (
+                    gpu_index, gpu_uuid, gpu_name, vendor,
+                    temperature_c, util_percent, mem_util_percent,
+                    mem_used_mb, mem_total_mb, power_draw_w, power_limit_w
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        g.get("index"),
+                        g.get("uuid"),
+                        g.get("name"),
+                        g.get("vendor"),
+                        g.get("temperature_c"),
+                        g.get("util_percent"),
+                        g.get("mem_util_percent"),
+                        g.get("mem_used_mb"),
+                        g.get("mem_total_mb"),
+                        g.get("power_draw_w"),
+                        g.get("power_limit_w"),
+                    )
+                    for g in gpus
+                ],
+            )
+
+    def record_system_power(self, sample: Dict[str, Any]) -> None:
+        """Insert a single system-power sample."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO system_power
+                   (total_watts, cpu_watts, gpu_watts, baseline_watts, source)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    sample.get("total_watts"),
+                    sample.get("cpu_watts"),
+                    sample.get("gpu_watts"),
+                    sample.get("baseline_watts"),
+                    sample.get("source"),
+                ),
+            )
+
+    def get_latest_gpu_metrics(self) -> List[Dict]:
+        """Return the most recent row per gpu_index."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM gpu_metrics
+                   WHERE id IN (
+                       SELECT MAX(id) FROM gpu_metrics GROUP BY gpu_index
+                   )
+                   ORDER BY gpu_index"""
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_gpu_history(
+        self,
+        hours: int = 168,
+        gpu_index: Optional[int] = None,
+    ) -> List[Dict]:
+        """Return GPU metrics within a time window (default 7 days)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if gpu_index is not None:
+                cursor.execute(
+                    """SELECT * FROM gpu_metrics
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                         AND gpu_index = ?
+                       ORDER BY timestamp ASC""",
+                    (hours, gpu_index),
+                )
+            else:
+                cursor.execute(
+                    """SELECT * FROM gpu_metrics
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                       ORDER BY timestamp ASC""",
+                    (hours,),
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_system_power_history(self, hours: int = 168) -> List[Dict]:
+        """Return system power samples within a time window."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM system_power
+                   WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                   ORDER BY timestamp ASC""",
+                (hours,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_gpu_summary(self, hours: int = 168) -> List[Dict]:
+        """Aggregate per-GPU min/max/avg for temp, util, and power.
+
+        ``idle`` is interpreted as the lowest observed power draw (i.e. when
+        the GPU is doing nothing) and the lowest observed temperature.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT
+                    gpu_index,
+                    MAX(gpu_name) AS gpu_name,
+                    MAX(vendor) AS vendor,
+                    MAX(temperature_c) AS temp_max,
+                    MIN(temperature_c) AS temp_min,
+                    AVG(temperature_c) AS temp_avg,
+                    MAX(util_percent) AS util_max,
+                    MIN(util_percent) AS util_min,
+                    AVG(util_percent) AS util_avg,
+                    MAX(power_draw_w) AS power_max,
+                    MIN(power_draw_w) AS power_min,
+                    AVG(power_draw_w) AS power_avg,
+                    MAX(power_limit_w) AS power_limit
+                   FROM gpu_metrics
+                   WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                   GROUP BY gpu_index
+                   ORDER BY gpu_index""",
+                (hours,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_system_power_summary(self, hours: int = 168) -> Dict[str, Any]:
+        """Aggregate system power totals over a window."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT
+                    MAX(total_watts) AS total_max,
+                    MIN(total_watts) AS total_min,
+                    AVG(total_watts) AS total_avg,
+                    MAX(source) AS source
+                   FROM system_power
+                   WHERE timestamp >= datetime('now', '-' || ? || ' hours')""",
+                (hours,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else {}
 
     # ------------------------------------------------------------------ #
     # Snapshot helpers                                                     #

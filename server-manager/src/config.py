@@ -55,6 +55,8 @@ class MonitoringConfig(BaseModel):
     """Monitoring configuration"""
     disk_check_interval: int = 300  # seconds
     metrics_interval: int = 60  # seconds
+    gpu_check_interval: int = 60  # seconds; per-GPU temp/util/power sampling
+    system_power_baseline_watts: float = 65.0  # mobo + drives + fans estimate
 
 
 class ThresholdsConfig(BaseModel):
@@ -63,6 +65,11 @@ class ThresholdsConfig(BaseModel):
     disk_temp_critical: int = 50
     disk_space_warning: int = 85
     disk_space_critical: int = 95
+    gpu_temp_warning: int = 80
+    gpu_temp_critical: int = 90
+    psu_watts: int = 0  # 0 disables PSU headroom alerts
+    psu_warning_percent: int = 80
+    psu_critical_percent: int = 95
 
 
 class QuietHoursConfig(BaseModel):

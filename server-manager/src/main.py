@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from .config import load_config, save_config, Config, DiscordConfig, DigestConfig, QuietHoursConfig
 from .database import Database
 from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
+from .gpu_monitor import GpuMonitor, SystemPowerMonitor
 from .backup import BackupManager
 from .alerts import AlertManager
 from .update_checker import UpdateChecker
@@ -178,6 +179,8 @@ database: Optional[Database] = None
 disk_monitor: Optional[DiskMonitor] = None
 system_monitor: Optional[SystemMonitor] = None
 docker_monitor: Optional[DockerMonitor] = None
+gpu_monitor: Optional[GpuMonitor] = None
+system_power_monitor: Optional[SystemPowerMonitor] = None
 backup_manager: Optional[BackupManager] = None
 alert_manager: Optional[AlertManager] = None
 update_checker: Optional[UpdateChecker] = None
@@ -189,6 +192,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 async def startup_event():
     """Initialize application on startup"""
     global config, config_path, database, disk_monitor, system_monitor, docker_monitor
+    global gpu_monitor, system_power_monitor
     global backup_manager, alert_manager, update_checker, auto_updater, scheduler
 
     try:
@@ -211,6 +215,14 @@ async def startup_event():
         disk_monitor = DiskMonitor(all_drives) if all_drives else DiskMonitor([])
         system_monitor = SystemMonitor()
         docker_monitor = DockerMonitor()
+        gpu_monitor = GpuMonitor()
+        system_power_monitor = SystemPowerMonitor(
+            baseline_watts=config.monitoring.system_power_baseline_watts,
+        )
+        if gpu_monitor.available:
+            logger.info("GPU monitor initialized (vendor=%s)", gpu_monitor.vendor)
+        else:
+            logger.info("No GPU detected (nvidia-smi/rocm-smi not on PATH)")
 
         # Initialize backup manager
         backup_manager = BackupManager(config.backup)
@@ -255,6 +267,15 @@ async def startup_event():
             'interval',
             seconds=config.monitoring.metrics_interval,
             id='system_metrics'
+        )
+
+        # Schedule GPU + system power collection
+        scheduler.add_job(
+            collect_gpu_metrics_job,
+            'interval',
+            seconds=config.monitoring.gpu_check_interval,
+            id='gpu_metrics',
+            next_run_time=datetime.now(),
         )
 
         # Schedule backups
@@ -474,6 +495,88 @@ async def collect_metrics_job():
 
     except Exception as e:
         print(f"Error collecting metrics: {e}")
+
+
+_gpu_temp_alerted: Dict[int, bool] = {}
+_psu_alerted: bool = False
+
+
+async def collect_gpu_metrics_job():
+    """Sample GPU and system power and persist to the database."""
+    global _psu_alerted
+    if not database or not gpu_monitor or not system_power_monitor:
+        return
+
+    try:
+        gpus = await asyncio.to_thread(gpu_monitor.query)
+        power_sample = await asyncio.to_thread(system_power_monitor.read, gpus)
+
+        if gpus:
+            database.record_gpu_metrics(gpus)
+        # Always record the system power sample so wall-power history is complete
+        # even when no GPU is present.
+        database.record_system_power(power_sample)
+
+        if not config or not alert_manager:
+            return
+
+        # Per-GPU temperature alerts (edge-triggered: alert once on transition).
+        for gpu in gpus:
+            idx = gpu.get("index")
+            temp = gpu.get("temperature_c")
+            if idx is None or temp is None:
+                continue
+            was_alerted = _gpu_temp_alerted.get(idx, False)
+            if temp >= config.thresholds.gpu_temp_critical:
+                if not was_alerted:
+                    msg = (
+                        f"GPU {idx} ({gpu.get('name', 'unknown')}) at {temp:.0f}°C "
+                        f"(critical: {config.thresholds.gpu_temp_critical}°C)"
+                    )
+                    await alert_manager.send_alert("Critical GPU Temperature", msg, "critical")
+                    database.record_alert("critical", "gpu_temp", msg)
+                    _gpu_temp_alerted[idx] = True
+            elif temp >= config.thresholds.gpu_temp_warning:
+                if not was_alerted:
+                    msg = (
+                        f"GPU {idx} ({gpu.get('name', 'unknown')}) at {temp:.0f}°C "
+                        f"(warning: {config.thresholds.gpu_temp_warning}°C)"
+                    )
+                    await alert_manager.send_alert("High GPU Temperature", msg, "warning")
+                    database.record_alert("warning", "gpu_temp", msg)
+                    _gpu_temp_alerted[idx] = True
+            elif temp < config.thresholds.gpu_temp_warning - 5:
+                # Hysteresis: clear alert state once we cool well below the warning line.
+                _gpu_temp_alerted[idx] = False
+
+        # PSU headroom alert (when configured).
+        psu_watts = config.thresholds.psu_watts
+        total = power_sample.get("total_watts")
+        if psu_watts > 0 and total is not None:
+            pct = (total / psu_watts) * 100
+            if pct >= config.thresholds.psu_critical_percent:
+                if not _psu_alerted:
+                    msg = (
+                        f"System power {total:.0f}W is {pct:.0f}% of {psu_watts}W PSU "
+                        f"(critical: {config.thresholds.psu_critical_percent}%)"
+                    )
+                    await alert_manager.send_alert("PSU Headroom Critical", msg, "critical")
+                    database.record_alert("critical", "psu_headroom", msg)
+                    _psu_alerted = True
+            elif pct >= config.thresholds.psu_warning_percent:
+                if not _psu_alerted:
+                    msg = (
+                        f"System power {total:.0f}W is {pct:.0f}% of {psu_watts}W PSU "
+                        f"(warning: {config.thresholds.psu_warning_percent}%)"
+                    )
+                    await alert_manager.send_alert("PSU Headroom Warning", msg, "warning")
+                    database.record_alert("warning", "psu_headroom", msg)
+                    _psu_alerted = True
+            elif pct < config.thresholds.psu_warning_percent - 5:
+                _psu_alerted = False
+
+    except Exception as e:
+        logger.error("Error collecting GPU metrics: %s", e)
 
 
 async def backup_job():
@@ -698,6 +801,75 @@ async def get_metrics(request: Request, hours: int = 24, user: Dict = Depends(re
     return {
         "metrics": database.get_system_metrics(hours),
         "hours": hours
+    }
+
+
+@app.get("/api/gpu/current")
+@limiter.limit("60/minute")
+async def get_gpu_current(request: Request, user: Dict = Depends(require_admin)):
+    """Live GPU snapshot + system power. Bypasses the database for freshness."""
+    if not gpu_monitor or not system_power_monitor:
+        raise HTTPException(status_code=503, detail="GPU monitor not initialized")
+
+    gpus = await asyncio.to_thread(gpu_monitor.query)
+    power = await asyncio.to_thread(system_power_monitor.read, gpus)
+    psu_watts = config.thresholds.psu_watts if config else 0
+    psu_pct = None
+    if psu_watts and power.get("total_watts") is not None:
+        psu_pct = (power["total_watts"] / psu_watts) * 100
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "available": gpu_monitor.available,
+        "vendor": gpu_monitor.vendor,
+        "gpus": gpus,
+        "system_power": power,
+        "psu_watts": psu_watts,
+        "psu_percent": psu_pct,
+    }
+
+
+@app.get("/api/gpu/history")
+@limiter.limit("30/minute")
+async def get_gpu_history(
+    request: Request,
+    hours: int = 168,
+    gpu_index: Optional[int] = None,
+    user: Dict = Depends(require_admin),
+):
+    """GPU metric history (default 7 days)."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    hours = max(1, min(hours, 24 * 30))
+    return {
+        "hours": hours,
+        "gpu_metrics": database.get_gpu_history(hours=hours, gpu_index=gpu_index),
+        "system_power": database.get_system_power_history(hours=hours),
+    }
+
+
+@app.get("/api/gpu/summary")
+@limiter.limit("30/minute")
+async def get_gpu_summary(request: Request, user: Dict = Depends(require_admin)):
+    """Day + week aggregates for each GPU and total system power.
+
+    Returns both 24h ('day') and 7d ('week') buckets in one call so the
+    dashboard doesn't have to issue parallel requests just for stat tiles.
+    """
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    psu_watts = config.thresholds.psu_watts if config else 0
+    return {
+        "day": {
+            "gpus": database.get_gpu_summary(hours=24),
+            "system_power": database.get_system_power_summary(hours=24),
+        },
+        "week": {
+            "gpus": database.get_gpu_summary(hours=24 * 7),
+            "system_power": database.get_system_power_summary(hours=24 * 7),
+        },
+        "psu_watts": psu_watts,
     }
 
 
@@ -934,7 +1106,10 @@ async def check_immich_update(request: Request, user: Dict = Depends(require_adm
 @limiter.limit("30/minute")
 async def prometheus_metrics(request: Request, user: Dict = Depends(require_auth)):
     """Prometheus-compatible metrics endpoint. Requires auth (Immich token or Bearer)."""
-    body = generate_metrics(system_monitor, docker_monitor, disk_monitor, database)
+    body = generate_metrics(
+        system_monitor, docker_monitor, disk_monitor, database,
+        gpu_monitor=gpu_monitor, system_power_monitor=system_power_monitor,
+    )
     return PlainTextResponse(body, media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
