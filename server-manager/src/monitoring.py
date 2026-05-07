@@ -78,6 +78,11 @@ class DiskMonitor:
             else:
                 drive_type = 'hdd'
 
+            # Power state — "active", "idle", "standby". HDDs in standby
+            # draw ~1W vs ~6-9W spinning, so this directly explains
+            # baseline wattage drops.
+            power_mode = data.get('power_mode')
+
             # Extract key metrics
             health = {
                 'device': device,
@@ -87,14 +92,42 @@ class DiskMonitor:
                 'serial': data.get('serial_number', 'Unknown'),
                 'capacity': data.get('user_capacity', {}).get('bytes', 0),
                 'temperature': data.get('temperature', {}).get('current'),
-                'power_on_hours': None,
-                'power_cycle_count': None,
+                'power_state': power_mode,
+                'power_on_hours': data.get('power_on_time', {}).get('hours'),
+                'power_cycle_count': data.get('power_cycle_count'),
                 'reallocated_sectors': 0,
                 'pending_sectors': 0,
                 'uncorrectable_sectors': 0,
+                # NVMe-specific health fields, populated below when present.
+                'wear_percent': None,
+                'tb_written': None,
+                'media_errors': None,
                 'health_ok': True,
                 'warnings': []
             }
+
+            # NVMe SMART log — wear, lifetime writes, media errors.
+            nvme = data.get('nvme_smart_health_information_log', {})
+            if nvme:
+                # percentage_used = 0-100 lifetime wear (>=100 means
+                # past warranty endurance, drive may still be healthy).
+                wear = nvme.get('percentage_used')
+                if wear is not None:
+                    health['wear_percent'] = wear
+                    if wear >= 90:
+                        health['health_ok'] = False
+                        health['warnings'].append(f"NVMe at {wear}% wear")
+                # data_units_written is in 1000*512-byte units per the spec,
+                # so TB = units * 512_000 / 1_000_000_000_000 = units / 1_953_125.
+                duw = nvme.get('data_units_written')
+                if duw is not None:
+                    health['tb_written'] = round(duw / 1_953_125, 2)
+                media_errors = nvme.get('media_errors')
+                if media_errors is not None:
+                    health['media_errors'] = media_errors
+                    if media_errors > 0:
+                        health['health_ok'] = False
+                        health['warnings'].append(f"NVMe media errors: {media_errors}")
 
             # Parse SMART attributes (skip temperature — raw.value packs min/max/trip
             # into one integer giving absurd values; top-level temperature.current is used instead)
@@ -150,6 +183,82 @@ class DiskMonitor:
     def check_all_disks(self) -> List[Dict[str, Any]]:
         """Check health of all configured disks"""
         return [self.get_disk_health(device) for device in self.devices]
+
+
+class DiskIoMonitor:
+    """Per-device disk IO rate sampler.
+
+    Computes read/write byte rates between consecutive ``sample()`` calls
+    using ``psutil.disk_io_counters(perdisk=True)``. The first call has
+    nothing to delta against, so it returns an empty list — subsequent
+    calls return one entry per device with ``read_mb_s`` and
+    ``write_mb_s``.
+
+    Lets you correlate "disk was hammered" with "system power spiked" —
+    e.g. a SnapRAID sync running at 3 AM showing up on the power chart.
+    """
+
+    def __init__(self):
+        import time
+        self._last_counters: Dict[str, Any] = {}
+        self._last_ts: Optional[float] = None
+        self._time = time
+
+    @staticmethod
+    def _device_basename(device: str) -> str:
+        """Map ``/dev/sda`` → ``sda`` so we can join with psutil keys."""
+        if device.startswith("/dev/"):
+            return device[len("/dev/"):]
+        return device
+
+    def sample(self, devices: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Return per-device IO rates since the last sample.
+
+        Args:
+            devices: optional whitelist of /dev paths; when given, only
+                rates for those devices are returned. When None, every
+                device psutil reports is included.
+        """
+        try:
+            counters = psutil.disk_io_counters(perdisk=True)
+        except Exception:
+            return []
+        now = self._time.monotonic()
+        prev = self._last_counters
+        prev_ts = self._last_ts
+        self._last_counters = counters
+        self._last_ts = now
+
+        if not prev or prev_ts is None:
+            return []
+        elapsed = now - prev_ts
+        if elapsed <= 0:
+            return []
+
+        wanted = None
+        if devices:
+            wanted = {self._device_basename(d) for d in devices}
+
+        out: List[Dict[str, Any]] = []
+        for name, c in counters.items():
+            if wanted is not None and name not in wanted:
+                continue
+            old = prev.get(name)
+            if old is None:
+                continue
+            read_delta = c.read_bytes - old.read_bytes
+            write_delta = c.write_bytes - old.write_bytes
+            # Counters can reset on driver reload; skip negative deltas.
+            if read_delta < 0 or write_delta < 0:
+                continue
+            out.append({
+                "device": f"/dev/{name}",
+                "read_mb_s": (read_delta / 1_000_000) / elapsed,
+                "write_mb_s": (write_delta / 1_000_000) / elapsed,
+                "read_count": c.read_count - old.read_count,
+                "write_count": c.write_count - old.write_count,
+            })
+        return out
 
 
 class SystemMonitor:

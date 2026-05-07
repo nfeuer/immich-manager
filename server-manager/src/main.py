@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from .config import load_config, save_config, Config, DiscordConfig, DigestConfig, QuietHoursConfig
 from .database import Database
-from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor
+from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor, DiskIoMonitor
 from .gpu_monitor import GpuMonitor, SystemPowerMonitor
 from .backup import BackupManager
 from .alerts import AlertManager
@@ -177,6 +177,7 @@ config: Optional[Config] = None
 config_path: Optional[str] = None
 database: Optional[Database] = None
 disk_monitor: Optional[DiskMonitor] = None
+disk_io_monitor: Optional[DiskIoMonitor] = None
 system_monitor: Optional[SystemMonitor] = None
 docker_monitor: Optional[DockerMonitor] = None
 gpu_monitor: Optional[GpuMonitor] = None
@@ -191,7 +192,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 @app.on_event("startup")
 async def startup_event():
     """Initialize application on startup"""
-    global config, config_path, database, disk_monitor, system_monitor, docker_monitor
+    global config, config_path, database, disk_monitor, disk_io_monitor, system_monitor, docker_monitor
     global gpu_monitor, system_power_monitor
     global backup_manager, alert_manager, update_checker, auto_updater, scheduler
 
@@ -213,6 +214,7 @@ async def startup_event():
         # Initialize monitors
         all_drives = config.storage.data_drives + config.storage.parity_drives
         disk_monitor = DiskMonitor(all_drives) if all_drives else DiskMonitor([])
+        disk_io_monitor = DiskIoMonitor()
         system_monitor = SystemMonitor()
         docker_monitor = DockerMonitor()
         gpu_monitor = GpuMonitor()
@@ -534,6 +536,17 @@ async def collect_gpu_metrics_job():
         # Always record the system power sample so wall-power history is complete
         # even when no GPU is present.
         database.record_system_power(power_sample)
+
+        # Sample disk IO at the same cadence so power spikes can be
+        # correlated with disk activity at matching timestamps.
+        if disk_io_monitor:
+            io_devices = (
+                config.storage.data_drives + config.storage.parity_drives
+                if config and (config.storage.data_drives or config.storage.parity_drives)
+                else None
+            )
+            io_samples = await asyncio.to_thread(disk_io_monitor.sample, io_devices)
+            database.record_disk_io(io_samples)
 
         if not config or not alert_manager:
             return
@@ -876,6 +889,11 @@ async def get_gpu_history(
         "sample_interval_seconds": config.monitoring.gpu_check_interval if config else 60,
         "gpu_metrics": database.get_gpu_history(hours=hours, gpu_index=gpu_index),
         "system_power": database.get_system_power_history(hours=hours),
+        # Aggregate read+write across all devices into a single series
+        # per timestamp so the frontend can overlay it on the power chart
+        # without having to bin by device. Frontend queries the dedicated
+        # endpoint below for per-device breakdowns.
+        "disk_io": database.get_disk_io_history(hours=hours),
     }
 
 

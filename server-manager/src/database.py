@@ -104,6 +104,24 @@ MIGRATIONS: List[tuple] = [
     (6, "add drive_type to disk_health", [
         "ALTER TABLE disk_health ADD COLUMN drive_type TEXT",
     ]),
+    # Version 7: NVMe wear / power-state columns + disk_io rate history
+    (7, "add disk wear, power_state, and disk_io history", [
+        "ALTER TABLE disk_health ADD COLUMN power_state TEXT",
+        "ALTER TABLE disk_health ADD COLUMN wear_percent REAL",
+        "ALTER TABLE disk_health ADD COLUMN tb_written REAL",
+        "ALTER TABLE disk_health ADD COLUMN media_errors INTEGER",
+        """CREATE TABLE IF NOT EXISTS disk_io (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            device TEXT NOT NULL,
+            read_mb_s REAL,
+            write_mb_s REAL,
+            read_count INTEGER,
+            write_count INTEGER
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_disk_io_timestamp ON disk_io(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_disk_io_device_ts ON disk_io(device, timestamp)",
+    ]),
 ]
 
 
@@ -267,22 +285,74 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO disk_health (
-                    device, drive_type, smart_status, temperature, power_on_hours,
-                    power_cycle_count, reallocated_sectors, pending_sectors,
-                    uncorrectable_sectors, raw_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    device, drive_type, smart_status, temperature, power_state,
+                    power_on_hours, power_cycle_count, reallocated_sectors,
+                    pending_sectors, uncorrectable_sectors,
+                    wear_percent, tb_written, media_errors, raw_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 device,
                 data.get('drive_type'),
                 data.get('smart_status'),
                 data.get('temperature'),
+                data.get('power_state'),
                 data.get('power_on_hours'),
                 data.get('power_cycle_count'),
                 data.get('reallocated_sectors'),
                 data.get('pending_sectors'),
                 data.get('uncorrectable_sectors'),
+                data.get('wear_percent'),
+                data.get('tb_written'),
+                data.get('media_errors'),
                 str(data)
             ))
+
+    def record_disk_io(self, samples: List[Dict[str, Any]]) -> None:
+        """Record one row per device IO rate sample."""
+        if not samples:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                """INSERT INTO disk_io
+                   (device, read_mb_s, write_mb_s, read_count, write_count)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [
+                    (
+                        s.get("device"),
+                        s.get("read_mb_s"),
+                        s.get("write_mb_s"),
+                        s.get("read_count"),
+                        s.get("write_count"),
+                    )
+                    for s in samples
+                ],
+            )
+
+    def get_disk_io_history(
+        self,
+        hours: int = 168,
+        device: Optional[str] = None,
+    ) -> List[Dict]:
+        """Return disk IO samples within a time window."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if device:
+                cursor.execute(
+                    """SELECT * FROM disk_io
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                         AND device = ?
+                       ORDER BY timestamp ASC""",
+                    (hours, device),
+                )
+            else:
+                cursor.execute(
+                    """SELECT * FROM disk_io
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                       ORDER BY timestamp ASC""",
+                    (hours,),
+                )
+            return [dict(row) for row in cursor.fetchall()]
 
     def record_system_metrics(self, metrics: Dict[str, Any]):
         """Record system metrics"""
@@ -435,6 +505,10 @@ class Database:
             """)
             cursor.execute("""
                 DELETE FROM system_power
+                WHERE timestamp < datetime('now', '-14 days')
+            """)
+            cursor.execute("""
+                DELETE FROM disk_io
                 WHERE timestamp < datetime('now', '-14 days')
             """)
 

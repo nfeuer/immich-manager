@@ -4,6 +4,7 @@ import {
   BoltIcon,
   FireIcon,
   ChartBarIcon,
+  CircleStackIcon,
   ExclamationTriangleIcon,
   InformationCircleIcon,
 } from '@heroicons/react/24/outline'
@@ -231,6 +232,28 @@ function buildSeriesByGpu(history, field, gpuFilter) {
       name: `GPU ${idx}`,
       color: GPU_COLORS[idx % GPU_COLORS.length],
     }))
+}
+
+function buildDiskIoSeries(diskHistory) {
+  // One total throughput point per timestamp (read + write across devices),
+  // aggregated to make correlation against the power chart obvious.
+  // Per-device breakdown is shown as separate light series so a single
+  // hammered drive is identifiable.
+  if (!diskHistory) return []
+  const byDevice = new Map()
+  for (const r of diskHistory) {
+    const t = new Date(r.timestamp.replace(' ', 'T') + 'Z').getTime()
+    const dev = r.device
+    if (!byDevice.has(dev)) byDevice.set(dev, [])
+    const total = (Number(r.read_mb_s) || 0) + (Number(r.write_mb_s) || 0)
+    byDevice.get(dev).push({ t, v: total })
+  }
+  const colors = ['#60a5fa', '#f472b6', '#4ade80', '#facc15', '#a78bfa', '#fb923c']
+  return [...byDevice.entries()].map(([dev, points], i) => ({
+    name: dev,
+    color: colors[i % colors.length],
+    points,
+  }))
 }
 
 function buildSystemPowerStack(systemHistory, gpuHistory) {
@@ -484,6 +507,10 @@ export default function GpuPanel() {
     () => buildSystemPowerStack(history?.system_power, history?.gpu_metrics),
     [history],
   )
+  const diskIoSeries = useMemo(
+    () => buildDiskIoSeries(history?.disk_io),
+    [history],
+  )
 
   const gpuSummaryByIdx = (bucket) => {
     const out = new Map()
@@ -723,6 +750,39 @@ export default function GpuPanel() {
           </div>
           <BaselineCalibration baselineWatts={current?.system_power?.baseline_watts} />
         </div>
+
+        {diskIoSeries.length > 0 && (
+          <div className="mt-6 pt-5 border-t border-immich-border">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5 text-xs text-immich-muted uppercase tracking-wider">
+                <CircleStackIcon className="w-3.5 h-3.5" />
+                Disk Activity (read + write, MB/s per device)
+              </div>
+              <span className="text-[10px] text-immich-muted">
+                aligned with power chart above — hover to compare timestamps
+              </span>
+            </div>
+            <LineChart
+              series={diskIoSeries}
+              unit=" MB/s"
+              spanHours={hours}
+              gapMinutes={gapMinutes}
+              ariaLabel="Disk IO throughput over time"
+              yMin={0}
+            />
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-immich-muted">
+              {diskIoSeries.map((s) => (
+                <span key={s.name} className="inline-flex items-center gap-1.5">
+                  <span
+                    className="inline-block w-3 h-0.5"
+                    style={{ background: s.color }}
+                  />
+                  <span className="font-mono">{s.name}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </Section>
     </>
   )
