@@ -9,6 +9,7 @@ vi.mock('../hooks/useDashboard.js', () => ({
   useGpuSummary: vi.fn(),
   useGpuHistory: vi.fn(),
   useBaselineCalibration: vi.fn(() => ({ data: undefined, isLoading: false, refetch: vi.fn() })),
+  useSensors: vi.fn(() => ({ data: undefined, isLoading: false })),
 }))
 
 import {
@@ -143,6 +144,12 @@ const SAMPLE_CURRENT = {
     psu_efficiency: 0.92,
     source: 'estimated',
   },
+  cpu_temp: {
+    available: true,
+    package_c: 65,
+    max_core_c: 72,
+    cores_c: [60, 72, 68, 71],
+  },
   psu_watts: 750,
   psu_percent: 32,
   thresholds: {
@@ -218,6 +225,9 @@ describe('GpuPanel', () => {
     expect(screen.getByText('Now Total (AC)')).toBeInTheDocument()
     // PSU subtitle / metadata appears (in subtitle and Now Total tile)
     expect(screen.getAllByText(/750W PSU/).length).toBeGreaterThan(0)
+    // CPU temp surfaced — package and max-core both shown
+    expect(screen.getByText(/pkg 65°C/)).toBeInTheDocument()
+    expect(screen.getByText(/core 72°C/)).toBeInTheDocument()
   })
 
   it('shows per-GPU filter chips when more than one GPU is present', () => {

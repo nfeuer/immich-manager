@@ -13,6 +13,7 @@ import {
   useGpuSummary,
   useGpuHistory,
   useBaselineCalibration,
+  useSensors,
 } from '../hooks/useDashboard.js'
 import LineChart from './LineChart.jsx'
 import Skeleton from './Skeleton.jsx'
@@ -234,6 +235,71 @@ function buildSeriesByGpu(history, field, gpuFilter) {
     }))
 }
 
+function buildCpuTempSeries(systemHistory) {
+  if (!systemHistory) return []
+  const pkg = []
+  const core = []
+  for (const r of systemHistory) {
+    const t = new Date(r.timestamp.replace(' ', 'T') + 'Z').getTime()
+    if (r.cpu_package_temp_c != null) pkg.push({ t, v: Number(r.cpu_package_temp_c) })
+    if (r.cpu_max_core_temp_c != null) core.push({ t, v: Number(r.cpu_max_core_temp_c) })
+  }
+  const out = []
+  if (pkg.length) out.push({ name: 'CPU package', color: '#a78bfa', points: pkg })
+  if (core.length) out.push({ name: 'CPU max core', color: '#f59e0b', points: core })
+  return out
+}
+
+function SensorInventory() {
+  const { data } = useSensors()
+  if (!data) return null
+  const acSource = data.ac_power_source
+  return (
+    <details className="mt-4 text-[11px]">
+      <summary className="cursor-pointer text-immich-muted hover:text-immich-text">
+        Detected sensors ({data.hwmon?.length ?? 0} hwmon chips)
+      </summary>
+      <div className="mt-2 space-y-1.5 pl-3 border-l border-immich-border">
+        <div className="text-immich-muted">
+          AC power source:{' '}
+          <span
+            className={
+              acSource === 'estimated' ? 'text-immich-warning font-mono' : 'text-immich-success font-mono'
+            }
+          >
+            {acSource}
+          </span>
+          {acSource === 'estimated' && (
+            <span className="ml-2 text-immich-muted/70">
+              (no IPMI tool, no hwmon chip exposes power*_input — using RAPL+GPU+baseline)
+            </span>
+          )}
+        </div>
+        <div className="text-immich-muted">
+          CPU power source:{' '}
+          <span className="font-mono text-immich-text">{data.cpu_power_source ?? 'unavailable'}</span>
+        </div>
+        <div className="text-immich-muted">
+          CPU temp chip:{' '}
+          <span className="font-mono text-immich-text">{data.cpu_temp_chip ?? 'none'}</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1">
+          {data.hwmon?.map((c) => (
+            <div key={c.path} className="font-mono text-immich-muted">
+              <span className="text-immich-text">{c.path}</span>{' '}
+              <span className="text-immich-info">{c.name}</span>{' '}
+              <span className="text-[10px]">({c.sensors.length} sensors)</span>
+              {c.has_power_input && (
+                <span className="ml-1 text-immich-success">⚡ power_input</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </details>
+  )
+}
+
 function buildDiskIoSeries(diskHistory) {
   // One total throughput point per timestamp (read + write across devices),
   // aggregated to make correlation against the power chart obvious.
@@ -307,10 +373,14 @@ function buildSystemPowerStack(systemHistory, gpuHistory) {
   return [cpuSeries, ...gpuSeries, baselineSeries]
 }
 
-function SystemPowerStats({ current, daySummary, weekSummary, psuWatts }) {
+function SystemPowerStats({ current, daySummary, weekSummary, psuWatts, cpuTemp }) {
   const dcNow = current?.total_watts
   const acNow = current?.ac_watts
   const dcPct = dcNow != null && psuWatts ? (dcNow / psuWatts) * 100 : null
+  // i7-class CPUs throttle around 95-100°C; use 80/95 as warn/critical
+  // for a generic Intel desktop part.
+  const cpuTempTone = (t) =>
+    t == null ? 'default' : t >= 95 ? 'critical' : t >= 80 ? 'warning' : 'default'
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
       <StatTile
@@ -332,17 +402,36 @@ function SystemPowerStats({ current, daySummary, weekSummary, psuWatts }) {
         sub={current?.psu_efficiency ? `at ${fmtNum(current.psu_efficiency * 100, '%')} eff.` : null}
         help="Estimated wall-power draw. Higher than DC because PSUs aren't 100% efficient."
       />
-      <StatTile label="CPU" value={fmtNum(current?.cpu_watts, ' W', 1)} />
+      <StatTile
+        label="CPU Power"
+        value={fmtNum(current?.cpu_watts, ' W', 1)}
+        sub={
+          cpuTemp?.package_c != null
+            ? `pkg ${fmtNum(cpuTemp.package_c, '°C')}${
+                cpuTemp.max_core_c != null ? ` / core ${fmtNum(cpuTemp.max_core_c, '°C')}` : ''
+              }`
+            : null
+        }
+        tone={cpuTempTone(cpuTemp?.max_core_c ?? cpuTemp?.package_c)}
+      />
       <StatTile label="All GPUs" value={fmtNum(current?.gpu_watts, ' W', 1)} />
       <StatTile
         label="Day Peak"
         value={fmtNum(daySummary?.peak_watts, ' W', 0)}
-        sub={`avg ${fmtNum(daySummary?.avg_watts, ' W')}`}
+        sub={
+          daySummary?.peak_cpu_temp_c != null
+            ? `cpu peak ${fmtNum(daySummary.peak_cpu_core_temp_c ?? daySummary.peak_cpu_temp_c, '°C')}`
+            : `avg ${fmtNum(daySummary?.avg_watts, ' W')}`
+        }
       />
       <StatTile
         label="Week Peak"
         value={fmtNum(weekSummary?.peak_watts, ' W', 0)}
-        sub={`avg ${fmtNum(weekSummary?.avg_watts, ' W')}`}
+        sub={
+          weekSummary?.peak_cpu_core_temp_c != null
+            ? `cpu peak ${fmtNum(weekSummary.peak_cpu_core_temp_c, '°C')}`
+            : `avg ${fmtNum(weekSummary?.avg_watts, ' W')}`
+        }
       />
     </div>
   )
@@ -511,6 +600,14 @@ export default function GpuPanel() {
     () => buildDiskIoSeries(history?.disk_io),
     [history],
   )
+  const cpuTempSeries = useMemo(
+    () => buildCpuTempSeries(history?.system_power),
+    [history],
+  )
+  const tempChartSeries = useMemo(
+    () => [...tempSeries, ...cpuTempSeries],
+    [tempSeries, cpuTempSeries],
+  )
 
   const gpuSummaryByIdx = (bucket) => {
     const out = new Map()
@@ -553,6 +650,7 @@ export default function GpuPanel() {
             daySummary={summary?.day?.system_power}
             weekSummary={summary?.week?.system_power}
             psuWatts={psuWatts}
+            cpuTemp={current?.cpu_temp}
           />
         </div>
       </Section>
@@ -614,11 +712,11 @@ export default function GpuPanel() {
               Temperature
             </div>
             <LineChart
-              series={tempSeries}
+              series={tempChartSeries}
               unit="°C"
               spanHours={hours}
               gapMinutes={gapMinutes}
-              ariaLabel="GPU temperature over time"
+              ariaLabel="GPU and CPU temperature over time"
               threshold={thresholds.gpu_temp_warning}
               thresholdLabel={`warn ${thresholds.gpu_temp_warning}°C`}
               yMin="auto"
@@ -653,7 +751,7 @@ export default function GpuPanel() {
           </div>
         </div>
 
-        {gpus.length > 0 && (
+        {(gpus.length > 0 || cpuTempSeries.length > 0) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-4 text-xs text-immich-muted">
             {(filterIdx == null ? gpus : gpus.filter((g) => g.index === filterIdx)).map((gpu) => (
               <span key={gpu.uuid ?? gpu.index} className="inline-flex items-center gap-1.5">
@@ -662,6 +760,12 @@ export default function GpuPanel() {
                   style={{ background: GPU_COLORS[gpu.index % GPU_COLORS.length] }}
                 />
                 GPU {gpu.index} {gpu.name}
+              </span>
+            ))}
+            {cpuTempSeries.map((s) => (
+              <span key={s.name} className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-3 h-0.5" style={{ background: s.color }} />
+                {s.name}
               </span>
             ))}
           </div>
@@ -688,6 +792,7 @@ export default function GpuPanel() {
           daySummary={summary?.day?.system_power}
           weekSummary={summary?.week?.system_power}
           psuWatts={psuWatts}
+          cpuTemp={current?.cpu_temp}
         />
         <div className="mt-5">
           <LineChart
@@ -749,6 +854,7 @@ export default function GpuPanel() {
             )}
           </div>
           <BaselineCalibration baselineWatts={current?.system_power?.baseline_watts} />
+          <SensorInventory />
         </div>
 
         {diskIoSeries.length > 0 && (

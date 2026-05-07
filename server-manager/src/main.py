@@ -20,6 +20,7 @@ from typing import Dict, Any, Optional, List
 import json
 import uvicorn
 import asyncio
+import shutil
 import subprocess
 import requests as http_requests
 import logging
@@ -31,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from .config import load_config, save_config, Config, DiscordConfig, DigestConfig, QuietHoursConfig
 from .database import Database
 from .monitoring import DiskMonitor, SystemMonitor, DockerMonitor, DiskIoMonitor
-from .gpu_monitor import GpuMonitor, SystemPowerMonitor
+from .gpu_monitor import GpuMonitor, SystemPowerMonitor, CpuTempMonitor
 from .backup import BackupManager
 from .alerts import AlertManager
 from .update_checker import UpdateChecker
@@ -182,6 +183,7 @@ system_monitor: Optional[SystemMonitor] = None
 docker_monitor: Optional[DockerMonitor] = None
 gpu_monitor: Optional[GpuMonitor] = None
 system_power_monitor: Optional[SystemPowerMonitor] = None
+cpu_temp_monitor: Optional[CpuTempMonitor] = None
 backup_manager: Optional[BackupManager] = None
 alert_manager: Optional[AlertManager] = None
 update_checker: Optional[UpdateChecker] = None
@@ -193,7 +195,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 async def startup_event():
     """Initialize application on startup"""
     global config, config_path, database, disk_monitor, disk_io_monitor, system_monitor, docker_monitor
-    global gpu_monitor, system_power_monitor
+    global gpu_monitor, system_power_monitor, cpu_temp_monitor
     global backup_manager, alert_manager, update_checker, auto_updater, scheduler
 
     try:
@@ -222,6 +224,11 @@ async def startup_event():
             baseline_watts=config.monitoring.system_power_baseline_watts,
             psu_efficiency=config.monitoring.psu_efficiency,
         )
+        cpu_temp_monitor = CpuTempMonitor()
+        if cpu_temp_monitor.available:
+            logger.info("CPU temperature monitor: %s", cpu_temp_monitor.chip_path)
+        else:
+            logger.info("CPU temperature monitor unavailable (no coretemp/k10temp hwmon chip)")
         if gpu_monitor.available:
             logger.info("GPU monitor initialized (vendor=%s)", gpu_monitor.vendor)
         else:
@@ -530,6 +537,12 @@ async def collect_gpu_metrics_job():
     try:
         gpus = await asyncio.to_thread(gpu_monitor.query)
         power_sample = await asyncio.to_thread(system_power_monitor.read, gpus)
+
+        # CPU temperature read alongside power so chart timestamps align.
+        if cpu_temp_monitor and cpu_temp_monitor.available:
+            cpu_temp = await asyncio.to_thread(cpu_temp_monitor.read)
+            power_sample["cpu_package_temp_c"] = cpu_temp.get("package_c")
+            power_sample["cpu_max_core_temp_c"] = cpu_temp.get("max_core_c")
 
         if gpus:
             database.record_gpu_metrics(gpus)
@@ -850,6 +863,11 @@ async def get_gpu_current(request: Request, user: Dict = Depends(require_admin))
 
     gpus = await asyncio.to_thread(gpu_monitor.query)
     power = await asyncio.to_thread(system_power_monitor.read, gpus)
+    cpu_temp = (
+        await asyncio.to_thread(cpu_temp_monitor.read)
+        if cpu_temp_monitor and cpu_temp_monitor.available
+        else {"available": False, "package_c": None, "max_core_c": None, "cores_c": []}
+    )
     psu_watts = config.thresholds.psu_watts if config else 0
     psu_pct = None
     if psu_watts and power.get("total_watts") is not None:
@@ -861,6 +879,7 @@ async def get_gpu_current(request: Request, user: Dict = Depends(require_admin))
         "vendor": gpu_monitor.vendor,
         "gpus": gpus,
         "system_power": power,
+        "cpu_temp": cpu_temp,
         "psu_watts": psu_watts,
         "psu_percent": psu_pct,
         "thresholds": {
@@ -869,6 +888,28 @@ async def get_gpu_current(request: Request, user: Dict = Depends(require_admin))
             "psu_warning_percent": config.thresholds.psu_warning_percent if config else 80,
             "psu_critical_percent": config.thresholds.psu_critical_percent if config else 95,
         },
+    }
+
+
+@app.get("/api/sensors")
+@limiter.limit("30/minute")
+async def list_sensors(request: Request, user: Dict = Depends(require_admin)):
+    """List the hwmon chips this server-manager can read.
+
+    Useful for figuring out *why* a particular data source is or isn't
+    available — e.g. whether a board sensor exposes ``power*_input``
+    that we could use as an authoritative AC reading.
+    """
+    inventory = SystemPowerMonitor.hwmon_inventory()
+    return {
+        "hwmon": inventory,
+        "ac_power_source": (
+            "ipmi" if shutil.which("ipmitool") else
+            "hwmon" if any(c["has_power_input"] for c in inventory) else
+            "estimated"
+        ),
+        "cpu_temp_chip": cpu_temp_monitor.chip_path if cpu_temp_monitor else None,
+        "cpu_power_source": "rapl" if (system_power_monitor and system_power_monitor._rapl_paths) else None,
     }
 
 

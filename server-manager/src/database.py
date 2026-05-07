@@ -122,6 +122,11 @@ MIGRATIONS: List[tuple] = [
         "CREATE INDEX IF NOT EXISTS idx_disk_io_timestamp ON disk_io(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_disk_io_device_ts ON disk_io(device, timestamp)",
     ]),
+    # Version 8: CPU package + max-core temperature alongside system_power
+    (8, "add cpu_temp columns to system_power", [
+        "ALTER TABLE system_power ADD COLUMN cpu_package_temp_c REAL",
+        "ALTER TABLE system_power ADD COLUMN cpu_max_core_temp_c REAL",
+    ]),
 ]
 
 
@@ -564,8 +569,9 @@ class Database:
             cursor.execute(
                 """INSERT INTO system_power
                    (total_watts, cpu_watts, gpu_watts, baseline_watts, source,
-                    ac_watts, psu_efficiency)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    ac_watts, psu_efficiency,
+                    cpu_package_temp_c, cpu_max_core_temp_c)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     sample.get("total_watts"),
                     sample.get("cpu_watts"),
@@ -574,6 +580,8 @@ class Database:
                     sample.get("source"),
                     sample.get("ac_watts"),
                     sample.get("psu_efficiency"),
+                    sample.get("cpu_package_temp_c"),
+                    sample.get("cpu_max_core_temp_c"),
                 ),
             )
 
@@ -773,6 +781,9 @@ class Database:
                     AVG(total_watts) AS avg_watts,
                     MAX(ac_watts) AS peak_ac_watts,
                     AVG(ac_watts) AS avg_ac_watts,
+                    MAX(cpu_package_temp_c) AS peak_cpu_temp_c,
+                    MAX(cpu_max_core_temp_c) AS peak_cpu_core_temp_c,
+                    AVG(cpu_package_temp_c) AS avg_cpu_temp_c,
                     MAX(source) AS source
                    FROM system_power
                    WHERE timestamp >= datetime('now', '-' || ? || ' hours')""",

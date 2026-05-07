@@ -47,6 +47,15 @@ export function useGpuHistory(hours = 168) {
   })
 }
 
+export function useSensors() {
+  return useQuery({
+    queryKey: ['sensors'],
+    queryFn: () => fetcher('/api/sensors'),
+    // Sensor inventory doesn't change at runtime — fetch once.
+    staleTime: 5 * 60_000,
+  })
+}
+
 export function useBaselineCalibration(enabled = false) {
   // On-demand only — calibration is an admin "show me a recommendation"
   // action, not something to poll.

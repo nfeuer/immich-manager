@@ -266,6 +266,34 @@ class SystemPowerMonitor:
         return paths
 
     @classmethod
+    def hwmon_inventory(cls) -> List[Dict[str, Any]]:
+        """List every hwmon chip and what it exposes.
+
+        Returned to the dashboard so the user can see exactly which
+        sensors the manager found — makes it obvious why a particular
+        data source (e.g. AC wall power) is or isn't available.
+        """
+        if not cls.HWMON_ROOT.exists():
+            return []
+        out: List[Dict[str, Any]] = []
+        for hw in sorted(cls.HWMON_ROOT.iterdir()):
+            try:
+                name = (hw / "name").read_text().strip()
+            except OSError:
+                continue
+            sensors = sorted(
+                f.name for f in hw.iterdir()
+                if f.name != "name" and f.name.endswith("_input")
+            )
+            out.append({
+                "path": hw.name,
+                "name": name,
+                "sensors": sensors,
+                "has_power_input": any(s.startswith("power") for s in sensors),
+            })
+        return out
+
+    @classmethod
     def _find_hwmon_power_input(cls) -> Optional[Path]:
         """Find a ``power1_input`` (microwatts) under hwmon, if any.
 
@@ -402,4 +430,93 @@ class SystemPowerMonitor:
             "gpu_watts": gpu_watts,
             "baseline_watts": self.baseline_watts,
             "psu_efficiency": self.psu_efficiency,
+        }
+
+
+# ---------------------------------------------------------------------------- #
+# CPU temperature                                                                #
+# ---------------------------------------------------------------------------- #
+
+
+class CpuTempMonitor:
+    """Read CPU package + per-core temperatures from hwmon.
+
+    Targets Intel ``coretemp`` (i.e. Skylake and newer i-series and
+    Xeons) and AMD ``k10temp`` chips. Returns ``None`` when neither is
+    present so the field can degrade gracefully.
+
+    coretemp layout for a 4-core/8-thread CPU like the i7-6700k::
+
+        /sys/class/hwmon/hwmonN/
+            name              -> "coretemp"
+            temp1_input       -> Package temperature (mC)
+            temp2_input       -> Core 0
+            temp3_input       -> Core 1
+            ...
+    """
+
+    HWMON_ROOT = Path("/sys/class/hwmon")
+
+    def __init__(self):
+        self._chip_path = self._find_chip()
+
+    @property
+    def available(self) -> bool:
+        return self._chip_path is not None
+
+    @property
+    def chip_path(self) -> Optional[str]:
+        return self._chip_path.name if self._chip_path else None
+
+    @classmethod
+    def _find_chip(cls) -> Optional[Path]:
+        if not cls.HWMON_ROOT.exists():
+            return None
+        for hw in sorted(cls.HWMON_ROOT.iterdir()):
+            try:
+                name = (hw / "name").read_text().strip()
+            except OSError:
+                continue
+            if name in ("coretemp", "k10temp", "zenpower"):
+                return hw
+        return None
+
+    def read(self) -> Dict[str, Any]:
+        """Return ``{package_c, max_core_c, cores_c, available}``.
+
+        ``package_c`` is the SoC die temperature (the closest single
+        number to "what the CPU thinks its temperature is"). ``max_core_c``
+        is the hottest core — usually the one to alert on for thermal
+        throttling. Both are ``None`` when unavailable.
+        """
+        if not self._chip_path:
+            return {"available": False, "package_c": None, "max_core_c": None, "cores_c": []}
+        package_c: Optional[float] = None
+        cores_c: List[float] = []
+        # Walk temp*_input. By coretemp convention temp1 is Package, temp2..N are cores.
+        for entry in sorted(self._chip_path.iterdir()):
+            if not entry.name.startswith("temp") or not entry.name.endswith("_input"):
+                continue
+            try:
+                m_c = int(entry.read_text().strip())
+            except (OSError, ValueError):
+                continue
+            celsius = m_c / 1000.0
+            label_path = self._chip_path / entry.name.replace("_input", "_label")
+            label = ""
+            if label_path.exists():
+                try:
+                    label = label_path.read_text().strip().lower()
+                except OSError:
+                    label = ""
+            if "package" in label or entry.name == "temp1_input":
+                package_c = celsius
+            else:
+                cores_c.append(celsius)
+        max_core_c = max(cores_c) if cores_c else None
+        return {
+            "available": True,
+            "package_c": package_c,
+            "max_core_c": max_core_c,
+            "cores_c": cores_c,
         }
