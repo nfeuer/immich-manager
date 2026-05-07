@@ -1,0 +1,522 @@
+"""
+GPU and system power monitoring.
+
+Collects per-GPU temperature, utilization, memory, and power draw via
+``nvidia-smi`` (NVIDIA) or ``rocm-smi`` (AMD), and estimates total system
+power draw from CPU RAPL counters plus GPU draw plus a configurable
+baseline. When IPMI/DCMI is available it is used as the authoritative
+source for system power.
+"""
+
+from __future__ import annotations
+
+import logging
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from .utils import CLEAN_ENV
+
+logger = logging.getLogger(__name__)
+
+
+_NVIDIA_QUERY_FIELDS = (
+    "index,uuid,name,temperature.gpu,utilization.gpu,utilization.memory,"
+    "memory.used,memory.total,power.draw,power.limit,"
+    "pstate,fan.speed,clocks.current.graphics,clocks.current.memory,"
+    "pcie.link.gen.current,pcie.link.width.current,driver_version"
+)
+
+
+class GpuMonitor:
+    """Per-GPU metrics collector with NVIDIA and AMD support.
+
+    The monitor is robust to missing tools — when ``nvidia-smi`` and
+    ``rocm-smi`` are both unavailable it returns an empty list rather than
+    raising, so the rest of the dashboard keeps working on systems
+    without a discrete GPU.
+    """
+
+    def __init__(self, nvidia_smi: str = "nvidia-smi", rocm_smi: str = "rocm-smi"):
+        self.nvidia_smi = nvidia_smi
+        self.rocm_smi = rocm_smi
+        self._vendor = self._detect_vendor()
+
+    def _detect_vendor(self) -> Optional[str]:
+        if shutil.which(self.nvidia_smi):
+            return "nvidia"
+        if shutil.which(self.rocm_smi):
+            return "amd"
+        return None
+
+    @property
+    def available(self) -> bool:
+        return self._vendor is not None
+
+    @property
+    def vendor(self) -> Optional[str]:
+        return self._vendor
+
+    # ------------------------------------------------------------------ #
+    # NVIDIA path                                                         #
+    # ------------------------------------------------------------------ #
+
+    def _query_nvidia(self) -> List[Dict[str, Any]]:
+        try:
+            result = subprocess.run(
+                [
+                    self.nvidia_smi,
+                    f"--query-gpu={_NVIDIA_QUERY_FIELDS}",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=CLEAN_ENV,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            logger.warning("nvidia-smi failed: %s", exc)
+            return []
+
+        if result.returncode != 0:
+            logger.warning("nvidia-smi exited %s: %s", result.returncode, result.stderr)
+            return []
+
+        gpus: List[Dict[str, Any]] = []
+        for line in result.stdout.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 10:
+                continue
+            try:
+                gpu = {
+                    "index": int(parts[0]),
+                    "uuid": parts[1],
+                    "name": parts[2],
+                    "temperature_c": _to_float(parts[3]),
+                    "util_percent": _to_float(parts[4]),
+                    "mem_util_percent": _to_float(parts[5]),
+                    "mem_used_mb": _to_float(parts[6]),
+                    "mem_total_mb": _to_float(parts[7]),
+                    "power_draw_w": _to_float(parts[8]),
+                    "power_limit_w": _to_float(parts[9]),
+                    # Optional newer fields — degrade gracefully on older drivers.
+                    "pstate": parts[10] if len(parts) > 10 and parts[10] not in ("", "[N/A]") else None,
+                    "fan_speed_percent": _to_float(parts[11]) if len(parts) > 11 else None,
+                    "gfx_clock_mhz": _to_float(parts[12]) if len(parts) > 12 else None,
+                    "mem_clock_mhz": _to_float(parts[13]) if len(parts) > 13 else None,
+                    "pcie_gen": _to_float(parts[14]) if len(parts) > 14 else None,
+                    "pcie_width": _to_float(parts[15]) if len(parts) > 15 else None,
+                    "driver_version": parts[16] if len(parts) > 16 and parts[16] not in ("", "[N/A]") else None,
+                    "vendor": "nvidia",
+                }
+            except (ValueError, IndexError) as exc:
+                logger.warning("Failed to parse nvidia-smi row %r: %s", line, exc)
+                continue
+            gpus.append(gpu)
+        return gpus
+
+    # ------------------------------------------------------------------ #
+    # AMD path                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _query_amd(self) -> List[Dict[str, Any]]:
+        try:
+            result = subprocess.run(
+                [self.rocm_smi, "--showid", "--showtemp", "--showuse",
+                 "--showmemuse", "--showpower", "--showproductname", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=CLEAN_ENV,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            logger.warning("rocm-smi failed: %s", exc)
+            return []
+
+        if result.returncode != 0:
+            return []
+
+        import json
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return []
+
+        gpus: List[Dict[str, Any]] = []
+        for key, info in data.items():
+            if not key.startswith("card"):
+                continue
+            try:
+                idx = int(key.replace("card", ""))
+            except ValueError:
+                continue
+            gpus.append({
+                "index": idx,
+                "uuid": info.get("Unique ID", key),
+                "name": info.get("Card series") or info.get("Card model") or "AMD GPU",
+                "temperature_c": _to_float(info.get("Temperature (Sensor edge) (C)")),
+                "util_percent": _to_float(info.get("GPU use (%)")),
+                "mem_util_percent": _to_float(info.get("GPU memory use (%)")),
+                "mem_used_mb": None,
+                "mem_total_mb": None,
+                "power_draw_w": _to_float(info.get("Average Graphics Package Power (W)")),
+                "power_limit_w": _to_float(info.get("Max Graphics Package Power (W)")),
+                "pstate": None,
+                "fan_speed_percent": _to_float(info.get("Fan speed (%)")),
+                "gfx_clock_mhz": None,
+                "mem_clock_mhz": None,
+                "pcie_gen": None,
+                "pcie_width": None,
+                "driver_version": None,
+                "vendor": "amd",
+            })
+        return gpus
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                          #
+    # ------------------------------------------------------------------ #
+
+    def query(self) -> List[Dict[str, Any]]:
+        """Return a list of GPU metric dicts (one per GPU, empty if none)."""
+        if self._vendor == "nvidia":
+            return self._query_nvidia()
+        if self._vendor == "amd":
+            return self._query_amd()
+        return []
+
+
+# ---------------------------------------------------------------------------- #
+# System power estimation                                                       #
+# ---------------------------------------------------------------------------- #
+
+
+def _to_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    if not s or s.lower() in {"n/a", "[n/a]", "not supported", "unknown"}:
+        return None
+    # Strip trailing units like "W", "C", "%", "MiB" if rocm-smi sneaks any in.
+    for suffix in ("W", "C", "%", "MiB", "MB"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)].strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+class SystemPowerMonitor:
+    """Estimate total system wall power draw.
+
+    Strategy, in order of preference:
+      1. IPMI DCMI power reading (``ipmitool dcmi power reading``) — AC
+         input wattage from the BMC when available. Server motherboards
+         only; rare on desktop boards.
+      2. ``hwmon`` ``power1_input`` — some boards (Supermicro, ASRock Rack,
+         a few Gigabyte/ASUS server boards) expose PSU input via an ITE
+         or Nuvoton sensor in microwatts.
+      3. Sum of CPU package power (Intel RAPL) + GPU draw + configurable
+         baseline wattage for motherboard / drives / fans.
+
+    PSU efficiency:
+      ``total_watts`` is reported in **DC watts** (component sum, what
+      your PSU must supply on its rails). When the source is IPMI/hwmon
+      we read AC input and multiply by ``psu_efficiency`` to convert.
+      ``ac_watts`` is also reported when known so the dashboard can
+      display both.
+
+    The RAPL read computes a delta in joules between two timestamps to
+    derive watts. The first call after construction returns ``None`` for
+    the CPU component, since a delta is required.
+    """
+
+    RAPL_ROOT = Path("/sys/class/powercap")
+    HWMON_ROOT = Path("/sys/class/hwmon")
+
+    def __init__(
+        self,
+        baseline_watts: float = 65.0,
+        psu_efficiency: float = 0.92,
+        ipmitool: str = "ipmitool",
+    ):
+        self.baseline_watts = baseline_watts
+        self.psu_efficiency = max(0.5, min(1.0, psu_efficiency))
+        self.ipmitool = ipmitool
+        self._rapl_paths = self._find_rapl_packages()
+        self._hwmon_power_path = self._find_hwmon_power_input()
+        self._last_rapl_uj: Optional[int] = None
+        self._last_rapl_ts: Optional[float] = None
+
+    @classmethod
+    def _find_rapl_packages(cls) -> List[Path]:
+        if not cls.RAPL_ROOT.exists():
+            return []
+        paths: List[Path] = []
+        for p in cls.RAPL_ROOT.iterdir():
+            name = p.name
+            # Only top-level package domains (intel-rapl:0, intel-rapl:1, ...)
+            if name.startswith("intel-rapl:") and ":" not in name.split("intel-rapl:", 1)[1]:
+                if (p / "energy_uj").exists():
+                    paths.append(p)
+        return paths
+
+    @classmethod
+    def hwmon_inventory(cls) -> List[Dict[str, Any]]:
+        """List every hwmon chip and what it exposes.
+
+        Returned to the dashboard so the user can see exactly which
+        sensors the manager found — makes it obvious why a particular
+        data source (e.g. AC wall power) is or isn't available.
+        """
+        if not cls.HWMON_ROOT.exists():
+            return []
+        out: List[Dict[str, Any]] = []
+        for hw in sorted(cls.HWMON_ROOT.iterdir()):
+            try:
+                name = (hw / "name").read_text().strip()
+            except OSError:
+                continue
+            sensors = sorted(
+                f.name for f in hw.iterdir()
+                if f.name != "name" and f.name.endswith("_input")
+            )
+            out.append({
+                "path": hw.name,
+                "name": name,
+                "sensors": sensors,
+                "has_power_input": any(s.startswith("power") for s in sensors),
+            })
+        return out
+
+    @classmethod
+    def _find_hwmon_power_input(cls) -> Optional[Path]:
+        """Find a ``power1_input`` (microwatts) under hwmon, if any.
+
+        Some server-grade boards expose total board / PSU input wattage here.
+        Most desktop boards don't, in which case we get None and fall back to
+        the RAPL+component estimate.
+        """
+        if not cls.HWMON_ROOT.exists():
+            return None
+        for hw in sorted(cls.HWMON_ROOT.iterdir()):
+            power_input = hw / "power1_input"
+            if not power_input.exists():
+                continue
+            # Sanity-read; some modules return permission errors at boot.
+            try:
+                int(power_input.read_text().strip())
+            except (OSError, ValueError):
+                continue
+            return power_input
+        return None
+
+    def _read_hwmon_watts(self) -> Optional[float]:
+        if not self._hwmon_power_path:
+            return None
+        try:
+            uw = int(self._hwmon_power_path.read_text().strip())
+        except (OSError, ValueError):
+            return None
+        # Ignore zero — common when the sensor is present but unreadable.
+        if uw <= 0:
+            return None
+        return uw / 1_000_000.0
+
+    def _read_ipmi_watts(self) -> Optional[float]:
+        if not shutil.which(self.ipmitool):
+            return None
+        try:
+            result = subprocess.run(
+                [self.ipmitool, "dcmi", "power", "reading"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=CLEAN_ENV,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.lower().startswith("instantaneous power reading"):
+                # Format: "Instantaneous power reading:                   215 Watts"
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    tokens = parts[1].strip().split()
+                    if tokens:
+                        try:
+                            return float(tokens[0])
+                        except ValueError:
+                            return None
+        return None
+
+    def _read_cpu_watts(self) -> Optional[float]:
+        if not self._rapl_paths:
+            return None
+        total_uj = 0
+        for p in self._rapl_paths:
+            try:
+                total_uj += int((p / "energy_uj").read_text().strip())
+            except (OSError, ValueError):
+                return None
+        now = time.monotonic()
+        prev_uj = self._last_rapl_uj
+        prev_ts = self._last_rapl_ts
+        self._last_rapl_uj = total_uj
+        self._last_rapl_ts = now
+        if prev_uj is None or prev_ts is None:
+            return None
+        elapsed = now - prev_ts
+        if elapsed <= 0:
+            return None
+        delta_uj = total_uj - prev_uj
+        # RAPL counter wraps; if it went backwards we can't trust this sample.
+        if delta_uj < 0:
+            return None
+        return (delta_uj / 1_000_000.0) / elapsed
+
+    def read(self, gpus: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Compute current system power draw given a list of GPU snapshots.
+
+        Returns:
+          - ``total_watts``: DC component sum, comparable to PSU rating
+          - ``ac_watts``: AC wall power (when measured), or estimated from
+            DC components / efficiency. ``None`` if neither.
+          - ``cpu_watts`` / ``gpu_watts`` / ``baseline_watts``: components
+          - ``source``: ``ipmi`` | ``hwmon`` | ``estimated`` | ``unavailable``
+        """
+        gpu_watts = sum((g.get("power_draw_w") or 0.0) for g in gpus) if gpus else None
+        cpu_watts = self._read_cpu_watts()
+
+        # Authoritative AC sources (from BMC or board sensor).
+        for source, ac_reader in (("ipmi", self._read_ipmi_watts), ("hwmon", self._read_hwmon_watts)):
+            ac = ac_reader()
+            if ac is not None:
+                return {
+                    "total_watts": ac * self.psu_efficiency,  # AC → DC
+                    "ac_watts": ac,
+                    "source": source,
+                    "cpu_watts": cpu_watts,
+                    "gpu_watts": gpu_watts,
+                    "baseline_watts": self.baseline_watts,
+                    "psu_efficiency": self.psu_efficiency,
+                }
+
+        if cpu_watts is None and not gpu_watts:
+            return {
+                "total_watts": None,
+                "ac_watts": None,
+                "source": "unavailable",
+                "cpu_watts": None,
+                "gpu_watts": None,
+                "baseline_watts": self.baseline_watts,
+                "psu_efficiency": self.psu_efficiency,
+            }
+
+        total_dc = (cpu_watts or 0.0) + (gpu_watts or 0.0) + self.baseline_watts
+        return {
+            "total_watts": total_dc,
+            # Estimated AC: DC / efficiency (you draw more from the wall than
+            # your components consume).
+            "ac_watts": total_dc / self.psu_efficiency if self.psu_efficiency > 0 else None,
+            "source": "estimated",
+            "cpu_watts": cpu_watts,
+            "gpu_watts": gpu_watts,
+            "baseline_watts": self.baseline_watts,
+            "psu_efficiency": self.psu_efficiency,
+        }
+
+
+# ---------------------------------------------------------------------------- #
+# CPU temperature                                                                #
+# ---------------------------------------------------------------------------- #
+
+
+class CpuTempMonitor:
+    """Read CPU package + per-core temperatures from hwmon.
+
+    Targets Intel ``coretemp`` (i.e. Skylake and newer i-series and
+    Xeons) and AMD ``k10temp`` chips. Returns ``None`` when neither is
+    present so the field can degrade gracefully.
+
+    coretemp layout for a 4-core/8-thread CPU like the i7-6700k::
+
+        /sys/class/hwmon/hwmonN/
+            name              -> "coretemp"
+            temp1_input       -> Package temperature (mC)
+            temp2_input       -> Core 0
+            temp3_input       -> Core 1
+            ...
+    """
+
+    HWMON_ROOT = Path("/sys/class/hwmon")
+
+    def __init__(self):
+        self._chip_path = self._find_chip()
+
+    @property
+    def available(self) -> bool:
+        return self._chip_path is not None
+
+    @property
+    def chip_path(self) -> Optional[str]:
+        return self._chip_path.name if self._chip_path else None
+
+    @classmethod
+    def _find_chip(cls) -> Optional[Path]:
+        if not cls.HWMON_ROOT.exists():
+            return None
+        for hw in sorted(cls.HWMON_ROOT.iterdir()):
+            try:
+                name = (hw / "name").read_text().strip()
+            except OSError:
+                continue
+            if name in ("coretemp", "k10temp", "zenpower"):
+                return hw
+        return None
+
+    def read(self) -> Dict[str, Any]:
+        """Return ``{package_c, max_core_c, cores_c, available}``.
+
+        ``package_c`` is the SoC die temperature (the closest single
+        number to "what the CPU thinks its temperature is"). ``max_core_c``
+        is the hottest core — usually the one to alert on for thermal
+        throttling. Both are ``None`` when unavailable.
+        """
+        if not self._chip_path:
+            return {"available": False, "package_c": None, "max_core_c": None, "cores_c": []}
+        package_c: Optional[float] = None
+        cores_c: List[float] = []
+        # Walk temp*_input. By coretemp convention temp1 is Package, temp2..N are cores.
+        for entry in sorted(self._chip_path.iterdir()):
+            if not entry.name.startswith("temp") or not entry.name.endswith("_input"):
+                continue
+            try:
+                m_c = int(entry.read_text().strip())
+            except (OSError, ValueError):
+                continue
+            celsius = m_c / 1000.0
+            label_path = self._chip_path / entry.name.replace("_input", "_label")
+            label = ""
+            if label_path.exists():
+                try:
+                    label = label_path.read_text().strip().lower()
+                except OSError:
+                    label = ""
+            if "package" in label or entry.name == "temp1_input":
+                package_c = celsius
+            else:
+                cores_c.append(celsius)
+        max_core_c = max(cores_c) if cores_c else None
+        return {
+            "available": True,
+            "package_c": package_c,
+            "max_core_c": max_core_c,
+            "cores_c": cores_c,
+        }

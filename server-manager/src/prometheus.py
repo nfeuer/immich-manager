@@ -17,6 +17,7 @@ from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .monitoring import SystemMonitor, DockerMonitor, DiskMonitor
+    from .gpu_monitor import GpuMonitor, SystemPowerMonitor
     from .database import Database
 
 
@@ -25,6 +26,8 @@ def generate_metrics(
     docker_monitor: Optional["DockerMonitor"],
     disk_monitor: Optional["DiskMonitor"],
     database: Optional["Database"],
+    gpu_monitor: Optional["GpuMonitor"] = None,
+    system_power_monitor: Optional["SystemPowerMonitor"] = None,
 ) -> str:
     """Build a Prometheus text exposition payload from live data."""
     lines: list[str] = []
@@ -79,6 +82,36 @@ def generate_metrics(
                     _gauge("immich_disk_pending_sectors", "Current pending sector count", d["pending_sectors"], labels)
                 healthy = 1 if d.get("health_ok", True) else 0
                 _gauge("immich_disk_healthy", "SMART health status (1=ok, 0=failing)", healthy, labels)
+        except Exception:
+            pass
+
+    # --- GPU metrics ---
+    if gpu_monitor and gpu_monitor.available:
+        try:
+            gpus = gpu_monitor.query()
+            for g in gpus:
+                idx = g.get("index", -1)
+                labels = f'gpu="{idx}",name="{g.get("name", "unknown")}"'
+                if g.get("temperature_c") is not None:
+                    _gauge("immich_gpu_temperature_celsius", "GPU temperature", g["temperature_c"], labels)
+                if g.get("util_percent") is not None:
+                    _gauge("immich_gpu_utilization_percent", "GPU utilization", g["util_percent"], labels)
+                if g.get("power_draw_w") is not None:
+                    _gauge("immich_gpu_power_watts", "GPU power draw", g["power_draw_w"], labels)
+                if g.get("power_limit_w") is not None:
+                    _gauge("immich_gpu_power_limit_watts", "GPU power limit", g["power_limit_w"], labels)
+                if g.get("mem_used_mb") is not None:
+                    _gauge("immich_gpu_memory_used_bytes", "GPU memory used", g["mem_used_mb"] * 1048576, labels)
+        except Exception:
+            pass
+
+    # --- System power draw ---
+    if system_power_monitor and gpu_monitor:
+        try:
+            gpus = gpu_monitor.query() if gpu_monitor.available else []
+            sample = system_power_monitor.read(gpus)
+            if sample.get("total_watts") is not None:
+                _gauge("immich_system_power_watts", "Estimated total system power", sample["total_watts"])
         except Exception:
             pass
 

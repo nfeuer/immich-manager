@@ -53,6 +53,80 @@ MIGRATIONS: List[tuple] = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_update_history_started_at ON update_history(started_at)",
     ]),
+    # Version 4: GPU and system power tracking
+    (4, "add gpu_metrics and system_power tables", [
+        """CREATE TABLE IF NOT EXISTS gpu_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            gpu_index INTEGER NOT NULL,
+            gpu_uuid TEXT,
+            gpu_name TEXT,
+            vendor TEXT,
+            temperature_c REAL,
+            util_percent REAL,
+            mem_util_percent REAL,
+            mem_used_mb REAL,
+            mem_total_mb REAL,
+            power_draw_w REAL,
+            power_limit_w REAL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_gpu_metrics_timestamp ON gpu_metrics(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_gpu_metrics_index_ts ON gpu_metrics(gpu_index, timestamp)",
+        """CREATE TABLE IF NOT EXISTS system_power (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            total_watts REAL,
+            cpu_watts REAL,
+            gpu_watts REAL,
+            baseline_watts REAL,
+            source TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_system_power_timestamp ON system_power(timestamp)",
+    ]),
+    # Version 5: GPU detail fields + AC wattage + alert-state persistence
+    (5, "add gpu detail columns, ac watts, alert_state", [
+        "ALTER TABLE gpu_metrics ADD COLUMN pstate TEXT",
+        "ALTER TABLE gpu_metrics ADD COLUMN fan_speed_percent REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN gfx_clock_mhz REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN mem_clock_mhz REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN pcie_gen REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN pcie_width REAL",
+        "ALTER TABLE gpu_metrics ADD COLUMN driver_version TEXT",
+        "ALTER TABLE system_power ADD COLUMN ac_watts REAL",
+        "ALTER TABLE system_power ADD COLUMN psu_efficiency REAL",
+        """CREATE TABLE IF NOT EXISTS alert_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+    ]),
+    # Version 6: Drive-type column for per-type temperature thresholds
+    (6, "add drive_type to disk_health", [
+        "ALTER TABLE disk_health ADD COLUMN drive_type TEXT",
+    ]),
+    # Version 7: NVMe wear / power-state columns + disk_io rate history
+    (7, "add disk wear, power_state, and disk_io history", [
+        "ALTER TABLE disk_health ADD COLUMN power_state TEXT",
+        "ALTER TABLE disk_health ADD COLUMN wear_percent REAL",
+        "ALTER TABLE disk_health ADD COLUMN tb_written REAL",
+        "ALTER TABLE disk_health ADD COLUMN media_errors INTEGER",
+        """CREATE TABLE IF NOT EXISTS disk_io (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            device TEXT NOT NULL,
+            read_mb_s REAL,
+            write_mb_s REAL,
+            read_count INTEGER,
+            write_count INTEGER
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_disk_io_timestamp ON disk_io(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_disk_io_device_ts ON disk_io(device, timestamp)",
+    ]),
+    # Version 8: CPU package + max-core temperature alongside system_power
+    (8, "add cpu_temp columns to system_power", [
+        "ALTER TABLE system_power ADD COLUMN cpu_package_temp_c REAL",
+        "ALTER TABLE system_power ADD COLUMN cpu_max_core_temp_c REAL",
+    ]),
 ]
 
 
@@ -216,21 +290,74 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO disk_health (
-                    device, smart_status, temperature, power_on_hours,
-                    power_cycle_count, reallocated_sectors, pending_sectors,
-                    uncorrectable_sectors, raw_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    device, drive_type, smart_status, temperature, power_state,
+                    power_on_hours, power_cycle_count, reallocated_sectors,
+                    pending_sectors, uncorrectable_sectors,
+                    wear_percent, tb_written, media_errors, raw_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 device,
+                data.get('drive_type'),
                 data.get('smart_status'),
                 data.get('temperature'),
+                data.get('power_state'),
                 data.get('power_on_hours'),
                 data.get('power_cycle_count'),
                 data.get('reallocated_sectors'),
                 data.get('pending_sectors'),
                 data.get('uncorrectable_sectors'),
+                data.get('wear_percent'),
+                data.get('tb_written'),
+                data.get('media_errors'),
                 str(data)
             ))
+
+    def record_disk_io(self, samples: List[Dict[str, Any]]) -> None:
+        """Record one row per device IO rate sample."""
+        if not samples:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                """INSERT INTO disk_io
+                   (device, read_mb_s, write_mb_s, read_count, write_count)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [
+                    (
+                        s.get("device"),
+                        s.get("read_mb_s"),
+                        s.get("write_mb_s"),
+                        s.get("read_count"),
+                        s.get("write_count"),
+                    )
+                    for s in samples
+                ],
+            )
+
+    def get_disk_io_history(
+        self,
+        hours: int = 168,
+        device: Optional[str] = None,
+    ) -> List[Dict]:
+        """Return disk IO samples within a time window."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if device:
+                cursor.execute(
+                    """SELECT * FROM disk_io
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                         AND device = ?
+                       ORDER BY timestamp ASC""",
+                    (hours, device),
+                )
+            else:
+                cursor.execute(
+                    """SELECT * FROM disk_io
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                       ORDER BY timestamp ASC""",
+                    (hours,),
+                )
+            return [dict(row) for row in cursor.fetchall()]
 
     def record_system_metrics(self, metrics: Dict[str, Any]):
         """Record system metrics"""
@@ -375,7 +502,295 @@ class Database:
                 WHERE timestamp < datetime('now', '-' || ? || ' days')
             """, (days,))
 
+            # GPU history is high-volume (per-minute per-GPU); cap independently at 14 days
+            # so the 7-day dashboard window always has full coverage with a buffer.
+            cursor.execute("""
+                DELETE FROM gpu_metrics
+                WHERE timestamp < datetime('now', '-14 days')
+            """)
+            cursor.execute("""
+                DELETE FROM system_power
+                WHERE timestamp < datetime('now', '-14 days')
+            """)
+            cursor.execute("""
+                DELETE FROM disk_io
+                WHERE timestamp < datetime('now', '-14 days')
+            """)
+
             # Keep all backups and alerts history
+
+    # ------------------------------------------------------------------ #
+    # GPU + system power helpers                                          #
+    # ------------------------------------------------------------------ #
+
+    def record_gpu_metrics(self, gpus: List[Dict[str, Any]]) -> None:
+        """Insert one row per GPU snapshot."""
+        if not gpus:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                """INSERT INTO gpu_metrics (
+                    gpu_index, gpu_uuid, gpu_name, vendor,
+                    temperature_c, util_percent, mem_util_percent,
+                    mem_used_mb, mem_total_mb, power_draw_w, power_limit_w,
+                    pstate, fan_speed_percent, gfx_clock_mhz, mem_clock_mhz,
+                    pcie_gen, pcie_width, driver_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        g.get("index"),
+                        g.get("uuid"),
+                        g.get("name"),
+                        g.get("vendor"),
+                        g.get("temperature_c"),
+                        g.get("util_percent"),
+                        g.get("mem_util_percent"),
+                        g.get("mem_used_mb"),
+                        g.get("mem_total_mb"),
+                        g.get("power_draw_w"),
+                        g.get("power_limit_w"),
+                        g.get("pstate"),
+                        g.get("fan_speed_percent"),
+                        g.get("gfx_clock_mhz"),
+                        g.get("mem_clock_mhz"),
+                        g.get("pcie_gen"),
+                        g.get("pcie_width"),
+                        g.get("driver_version"),
+                    )
+                    for g in gpus
+                ],
+            )
+
+    def record_system_power(self, sample: Dict[str, Any]) -> None:
+        """Insert a single system-power sample."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO system_power
+                   (total_watts, cpu_watts, gpu_watts, baseline_watts, source,
+                    ac_watts, psu_efficiency,
+                    cpu_package_temp_c, cpu_max_core_temp_c)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    sample.get("total_watts"),
+                    sample.get("cpu_watts"),
+                    sample.get("gpu_watts"),
+                    sample.get("baseline_watts"),
+                    sample.get("source"),
+                    sample.get("ac_watts"),
+                    sample.get("psu_efficiency"),
+                    sample.get("cpu_package_temp_c"),
+                    sample.get("cpu_max_core_temp_c"),
+                ),
+            )
+
+    # ------------------------------------------------------------------ #
+    # Alert-state KV (persists transition state across service restarts)  #
+    # ------------------------------------------------------------------ #
+
+    def get_alert_state(self, key: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM alert_state WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row["value"] if row else None
+
+    def set_alert_state(self, key: str, value: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO alert_state (key, value, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (key, value),
+            )
+
+    def get_latest_gpu_metrics(self) -> List[Dict]:
+        """Return the most recent row per gpu_index."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM gpu_metrics
+                   WHERE id IN (
+                       SELECT MAX(id) FROM gpu_metrics GROUP BY gpu_index
+                   )
+                   ORDER BY gpu_index"""
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_gpu_history(
+        self,
+        hours: int = 168,
+        gpu_index: Optional[int] = None,
+    ) -> List[Dict]:
+        """Return GPU metrics within a time window (default 7 days)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if gpu_index is not None:
+                cursor.execute(
+                    """SELECT * FROM gpu_metrics
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                         AND gpu_index = ?
+                       ORDER BY timestamp ASC""",
+                    (hours, gpu_index),
+                )
+            else:
+                cursor.execute(
+                    """SELECT * FROM gpu_metrics
+                       WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                       ORDER BY timestamp ASC""",
+                    (hours,),
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_system_power_history(self, hours: int = 168) -> List[Dict]:
+        """Return system power samples within a time window."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM system_power
+                   WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                   ORDER BY timestamp ASC""",
+                (hours,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    # ``idle`` here = samples where the GPU was effectively doing nothing.
+    # 5% util is generous enough to include idle compositor work but excludes
+    # any meaningful workload.
+    _IDLE_UTIL_THRESHOLD = 5.0
+
+    def get_gpu_summary(self, hours: int = 168) -> List[Dict]:
+        """Aggregate per-GPU peak vs. idle stats over a window.
+
+        Returns one row per GPU with:
+          - ``peak_*``: maximum observed temp / util / power
+          - ``idle_*``: average temp / power on samples where util < 5%
+            (or ``None`` if the GPU was never idle in the window)
+          - ``avg_*``: window-wide averages
+          - ``sample_count``: total samples in window
+          - ``idle_sample_count``: samples that met the idle threshold
+
+        Idle is computed as an average of low-utilization samples rather
+        than ``MIN()`` so transient dips (e.g. between two inference batches)
+        don't get reported as the idle baseline.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT
+                    gpu_index,
+                    MAX(gpu_name) AS gpu_name,
+                    MAX(vendor) AS vendor,
+                    COUNT(*) AS sample_count,
+                    MAX(temperature_c) AS peak_temp,
+                    MAX(util_percent) AS peak_util,
+                    MAX(power_draw_w) AS peak_power,
+                    AVG(temperature_c) AS avg_temp,
+                    AVG(util_percent) AS avg_util,
+                    AVG(power_draw_w) AS avg_power,
+                    MAX(power_limit_w) AS power_limit,
+                    MAX(fan_speed_percent) AS peak_fan,
+                    -- Idle aggregates: AVG(...) FILTER (WHERE ...) gives us
+                    -- the per-GPU mean only over low-utilization samples.
+                    AVG(CASE WHEN util_percent < ?
+                            THEN temperature_c END) AS idle_temp,
+                    AVG(CASE WHEN util_percent < ?
+                            THEN power_draw_w END) AS idle_power,
+                    SUM(CASE WHEN util_percent < ? THEN 1 ELSE 0 END) AS idle_sample_count
+                   FROM gpu_metrics
+                   WHERE timestamp >= datetime('now', '-' || ? || ' hours')
+                   GROUP BY gpu_index
+                   ORDER BY gpu_index""",
+                (
+                    self._IDLE_UTIL_THRESHOLD,
+                    self._IDLE_UTIL_THRESHOLD,
+                    self._IDLE_UTIL_THRESHOLD,
+                    hours,
+                ),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_baseline_calibration(self, hours: int = 24) -> Dict[str, Any]:
+        """Suggest a baseline_watts value from observed idle samples.
+
+        Joins ``system_power`` with the same-bucket ``gpu_metrics`` to find
+        moments when both CPU and all GPUs were idle (low utilization),
+        then returns the average of (total - cpu - gpu_sum) on those
+        samples. That's the residual non-CPU/GPU draw — i.e. mobo +
+        drives + fans — which is exactly the baseline we want.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Pull recent system_power samples and join with the lowest-util
+            # GPU snapshot for each timestamp. We approximate "all GPUs idle"
+            # as the per-timestamp max of util_percent < 5; if you have only
+            # one GPU it's exact, with two GPUs both must be idle.
+            cursor.execute(
+                """SELECT
+                    sp.cpu_watts AS cpu_watts,
+                    sp.gpu_watts AS gpu_watts,
+                    sp.total_watts AS total_watts,
+                    sp.timestamp AS ts
+                   FROM system_power sp
+                   WHERE sp.timestamp >= datetime('now', '-' || ? || ' hours')
+                     AND sp.cpu_watts IS NOT NULL
+                     AND sp.gpu_watts IS NOT NULL
+                     AND sp.total_watts IS NOT NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM gpu_metrics gm
+                       WHERE gm.timestamp = sp.timestamp
+                         AND gm.util_percent >= 5
+                     )""",
+                (hours,),
+            )
+            rows = cursor.fetchall()
+            residuals = [
+                row["total_watts"] - (row["cpu_watts"] or 0) - (row["gpu_watts"] or 0)
+                for row in rows
+            ]
+            if not residuals:
+                return {
+                    "sample_count": 0,
+                    "recommended_baseline_watts": None,
+                    "min_residual": None,
+                    "median_residual": None,
+                    "max_residual": None,
+                }
+            residuals.sort()
+            median = residuals[len(residuals) // 2]
+            return {
+                "sample_count": len(residuals),
+                "recommended_baseline_watts": round(median, 1),
+                "min_residual": round(residuals[0], 1),
+                "median_residual": round(median, 1),
+                "max_residual": round(residuals[-1], 1),
+            }
+
+    def get_system_power_summary(self, hours: int = 168) -> Dict[str, Any]:
+        """Aggregate system power totals over a window."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT
+                    COUNT(*) AS sample_count,
+                    MAX(total_watts) AS peak_watts,
+                    AVG(total_watts) AS avg_watts,
+                    MAX(ac_watts) AS peak_ac_watts,
+                    AVG(ac_watts) AS avg_ac_watts,
+                    MAX(cpu_package_temp_c) AS peak_cpu_temp_c,
+                    MAX(cpu_max_core_temp_c) AS peak_cpu_core_temp_c,
+                    AVG(cpu_package_temp_c) AS avg_cpu_temp_c,
+                    MAX(source) AS source
+                   FROM system_power
+                   WHERE timestamp >= datetime('now', '-' || ? || ' hours')""",
+                (hours,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else {}
 
     # ------------------------------------------------------------------ #
     # Snapshot helpers                                                     #

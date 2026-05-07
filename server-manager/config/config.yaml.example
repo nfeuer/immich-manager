@@ -25,11 +25,17 @@ immich:
 
 storage:
   mergerfs_mount: "/mnt/storage"
+  # All drives listed here get SMART health + temperature monitoring.
+  # Mix HDDs, SSDs, and NVMe freely — drive type is auto-detected and
+  # the right temperature thresholds (see thresholds.* below) are applied
+  # per type.
   data_drives:
-    - "/dev/sda"
-    - "/dev/sdb"
+    - "/dev/nvme0n1"   # M.2 NVMe — system / fast cache
+    - "/dev/sda"       # Samsung SSD
+    - "/dev/sdb"       # HDD 1
+    - "/dev/sdc"       # HDD 2
   parity_drives:
-    - "/dev/sdc"
+    - "/dev/sdd"       # HDD 3 — parity
   snapraid_config: "/etc/snapraid.conf"
 
 backup:
@@ -96,12 +102,34 @@ auto_update:
 monitoring:
   disk_check_interval: 300  # 5 minutes
   metrics_interval: 60      # 1 minute
+  gpu_check_interval: 10    # seconds — short enough to catch transient PSU spikes
+  # Estimated mobo + RAM + chipset + drives + fans wattage when GPUs/CPU are idle.
+  # For a Z170-class board with 1 NVMe + 1 SSD + 3 HDDs spinning + a few fans,
+  # ~75 W is realistic. Hit /api/gpu/calibrate-baseline after a quiet period to
+  # get a measured value tailored to your exact hardware.
+  system_power_baseline_watts: 75.0
+  psu_efficiency: 0.92      # AC↔DC conversion. Corsair RMx Platinum ≈ 0.92 at typical loads.
 
 thresholds:
-  disk_temp_warning: 45
-  disk_temp_critical: 50
+  # Per-drive-type temperature thresholds. Drive type is auto-detected,
+  # and NVMe drives normally run hot (50-65°C under load) so they need
+  # higher limits than HDDs.
+  disk_temp_warning: 45     # HDD warning
+  disk_temp_critical: 50    # HDD critical
+  ssd_temp_warning: 60
+  ssd_temp_critical: 70
+  nvme_temp_warning: 70     # NVMe controllers throttle around 75-85°C
+  nvme_temp_critical: 80
   disk_space_warning: 85
   disk_space_critical: 95
+  gpu_temp_warning: 80
+  gpu_temp_critical: 90
+  # PSU headroom alerts. Set psu_watts to your PSU's rated DC output wattage.
+  # Compared against the DC component sum (CPU + GPUs + baseline), so
+  # efficiency losses don't inflate the percentage.
+  psu_watts: 750         # Corsair RM750x Platinum
+  psu_warning_percent: 80
+  psu_critical_percent: 95
 
 auth:
   default_role: "user"  # Role assigned to new users: "admin", "user", or "guest"

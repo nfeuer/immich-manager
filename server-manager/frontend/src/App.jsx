@@ -7,6 +7,7 @@ import AlertsPanel from './components/AlertsPanel.jsx'
 import DiskHealthCard from './components/DiskHealthCard.jsx'
 import BackupsCard from './components/BackupsCard.jsx'
 import LogViewer from './components/LogViewer.jsx'
+import GpuPanel from './components/GpuPanel.jsx'
 import ServiceControls from './components/ServiceControls.jsx'
 import UpdateManagement from './components/UpdateManagement.jsx'
 import DiscordConfig from './components/DiscordConfig.jsx'
@@ -30,6 +31,7 @@ export default function App() {
             <BackupsCard />
           </div>
           <AlertsPanel />
+          <GpuPanel />
           <LogViewer />
           <ServiceControls />
           <DiscordConfig />

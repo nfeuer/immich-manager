@@ -22,6 +22,52 @@ export function useAlerts() {
   return useQuery({ queryKey: ['alerts'], queryFn: () => fetcher('/api/alerts') })
 }
 
+export function useGpuCurrent() {
+  // Live snapshot — refresh aggressively so you can watch the numbers move.
+  return useQuery({
+    queryKey: ['gpu-current'],
+    queryFn: () => fetcher('/api/gpu/current'),
+    refetchInterval: 5000,
+  })
+}
+
+export function useGpuSummary() {
+  return useQuery({
+    queryKey: ['gpu-summary'],
+    queryFn: () => fetcher('/api/gpu/summary'),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useGpuHistory(hours = 168) {
+  return useQuery({
+    queryKey: ['gpu-history', hours],
+    queryFn: () => fetcher(`/api/gpu/history?hours=${hours}`),
+    refetchInterval: 60_000,
+  })
+}
+
+export function useSensors() {
+  return useQuery({
+    queryKey: ['sensors'],
+    queryFn: () => fetcher('/api/sensors'),
+    // Sensor inventory doesn't change at runtime — fetch once.
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useBaselineCalibration(enabled = false) {
+  // On-demand only — calibration is an admin "show me a recommendation"
+  // action, not something to poll.
+  return useQuery({
+    queryKey: ['gpu-calibrate'],
+    queryFn: () => fetcher('/api/gpu/calibrate-baseline?hours=24'),
+    enabled,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  })
+}
+
 // Returns the most recent dataUpdatedAt across all four polling queries.
 // Uses a cache subscription so consumers re-render when any query updates.
 export function useLastRefreshed() {
