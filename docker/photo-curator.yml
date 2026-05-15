@@ -28,7 +28,7 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       # Internal Docker hostname for Immich — overrides the localhost default in config.yaml
-      - IMMICH_BASE_URL=http://immich_server:2283
+      - IMMICH_BASE_URL=http://immich-server:2283
     # GPU assignment — uses PHOTO_CURATOR_GPU_ID from docker/.env
     deploy:
       resources:

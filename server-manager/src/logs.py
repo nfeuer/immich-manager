@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 # Map service names to Docker container name filters or journalctl unit names
 _DOCKER_SERVICES = {
-    "immich_server",
-    "immich_machine_learning",
-    "immich_postgres",
-    "immich_redis",
+    "immich-server",
+    "immich-ml",
+    "immich-postgres",
+    "immich-redis",
 }
 
 _JOURNALCTL_UNITS = {
@@ -136,7 +136,7 @@ def _docker_stream(service: str) -> Generator[str, None, None]:
 def _journal_snapshot(unit: str | None, lines: int) -> List[str]:
     cmd = ["journalctl", "-n", str(lines), "--no-pager", "--output=short"]
     if unit:
-        cmd += ["-u", unit]
+        cmd += ["-t", unit]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=CLEAN_ENV)
         return result.stdout.splitlines()
@@ -148,7 +148,7 @@ def _journal_snapshot(unit: str | None, lines: int) -> List[str]:
 def _journal_stream(unit: str | None) -> Generator[str, None, None]:
     cmd = ["journalctl", "-f", "--no-pager", "--output=short"]
     if unit:
-        cmd += ["-u", unit]
+        cmd += ["-t", unit]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=CLEAN_ENV)
         for line in proc.stdout:

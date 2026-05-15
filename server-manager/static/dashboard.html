@@ -166,10 +166,10 @@
                     <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">📋 Log Viewer</h2>
                     <div class="flex flex-wrap gap-3 mb-3 items-center">
                         <select id="logServiceSelect" class="px-3 py-2 rounded-lg text-sm bg-gray-100 dark:bg-immich-gray-800 border border-gray-200 dark:border-immich-gray-700 text-gray-900 dark:text-white cursor-pointer" onchange="onLogServiceChange()">
-                            <option value="immich_server">immich_server</option>
-                            <option value="immich_machine_learning">immich_machine_learning</option>
-                            <option value="immich_postgres">immich_postgres</option>
-                            <option value="immich_redis">immich_redis</option>
+                            <option value="immich-server">immich-server</option>
+                            <option value="immich-ml">immich-ml</option>
+                            <option value="immich-postgres">immich-postgres</option>
+                            <option value="immich-redis">immich-redis</option>
                             <option value="server_manager">server_manager</option>
                             <option value="photo_curator">photo_curator</option>
                             <option value="system">system</option>
@@ -187,7 +187,7 @@
                 <div class="bg-white dark:bg-immich-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-immich-gray-800 p-5 mt-5">
                     <h2 class="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-immich-gray-700 pb-2.5 mb-4">⚙️ Service Controls</h2>
                     <div class="space-y-2">
-                        ${["immich_server","immich_machine_learning","immich_postgres","immich_redis","server_manager","photo_curator"].map(svc => `
+                        ${["immich-server","immich-ml","immich-postgres","immich-redis","server_manager","photo_curator"].map(svc => `
                             <div class="flex justify-between items-center py-2 border-b border-gray-50 dark:border-immich-gray-800 last:border-0">
                                 <span class="text-sm font-mono text-gray-700 dark:text-gray-300">${esc(svc)}</span>
                                 <button id="restartBtn_${esc(svc)}" class="px-3 py-1.5 bg-immich-primary hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors cursor-pointer border-none" onclick="restartService('${esc(svc)}')">Restart</button>

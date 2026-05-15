@@ -1630,11 +1630,11 @@ async def apply_update(
 
 # --- Valid service identifiers ---
 _VALID_SERVICES = {
-    "immich_server", "immich_machine_learning", "immich_postgres", "immich_redis",
+    "immich-server", "immich-ml", "immich-postgres", "immich-redis",
     "server_manager", "photo_curator", "system",
 }
 
-_DOCKER_SERVICES = {"immich_server", "immich_machine_learning", "immich_postgres", "immich_redis"}
+_DOCKER_SERVICES = {"immich-server", "immich-ml", "immich-postgres", "immich-redis"}
 _SYSTEMD_SERVICES = {"server_manager": "immich-server-manager", "photo_curator": "photo-curator"}
 
 
@@ -1689,8 +1689,7 @@ async def restart_service(request: Request, service: str, user: Dict = Depends(r
         if service in _DOCKER_SERVICES:
             import docker as docker_sdk
             client = docker_sdk.from_env()
-            name_filter = service.replace("_", "-")
-            matches = client.containers.list(filters={"name": name_filter})
+            matches = client.containers.list(filters={"name": service})
             if not matches:
                 raise HTTPException(status_code=404, detail=f"Container for {service} not found")
             matches[0].restart()

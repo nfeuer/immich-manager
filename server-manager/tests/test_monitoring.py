@@ -234,7 +234,7 @@ def test_docker_monitor_init_available(mock_docker):
 @patch("src.monitoring.docker.from_env")
 def test_get_immich_containers(mock_docker):
     mock_container = MagicMock()
-    mock_container.name = "immich_server"
+    mock_container.name = "immich-server"
     mock_container.status = "running"
     mock_container.image.tags = ["ghcr.io/immich-app/immich-server:v1.126.1"]
 
@@ -245,14 +245,14 @@ def test_get_immich_containers(mock_docker):
     dm = DockerMonitor()
     containers = dm.get_immich_containers()
     assert len(containers) == 1
-    assert containers[0]["name"] == "immich_server"
+    assert containers[0]["name"] == "immich-server"
     assert containers[0]["status"] == "running"
 
 
 @patch("src.monitoring.docker.from_env")
 def test_check_immich_healthy_all_running(mock_docker):
     containers = []
-    for name in ["immich_server", "immich_ml", "immich_postgres", "immich_redis"]:
+    for name in ["immich-server", "immich-ml", "immich-postgres", "immich-redis"]:
         c = MagicMock()
         c.name = name
         c.status = "running"
@@ -270,9 +270,9 @@ def test_check_immich_healthy_all_running(mock_docker):
 @patch("src.monitoring.docker.from_env")
 def test_check_immich_healthy_one_stopped(mock_docker):
     running = MagicMock()
-    running.name = "immich_server"
+    running.name = "immich-server"
     running.status = "running"
-    running.image.tags = ["immich_server:latest"]
+    running.image.tags = ["immich-server:latest"]
 
     stopped = MagicMock()
     stopped.name = "immich_ml"
@@ -324,8 +324,8 @@ def test_get_container_stats(mock_docker):
     mock_docker.return_value = mock_client
 
     dm = DockerMonitor()
-    stats = dm.get_container_stats("immich_server")
-    assert stats["name"] == "immich_server"
+    stats = dm.get_container_stats("immich-server")
+    assert stats["name"] == "immich-server"
     assert stats["status"] == "running"
     assert stats["cpu_percent"] == pytest.approx(10.0)
     assert stats["memory_mb"] == pytest.approx(256.0)
@@ -334,4 +334,4 @@ def test_get_container_stats(mock_docker):
 @patch("src.monitoring.docker.from_env", side_effect=Exception("Docker not running"))
 def test_get_container_stats_docker_unavailable(mock_docker):
     dm = DockerMonitor()
-    assert dm.get_container_stats("immich_server") is None
+    assert dm.get_container_stats("immich-server") is None

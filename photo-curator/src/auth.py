@@ -26,7 +26,7 @@ class ImmichAuth:
         Initialize auth handler
 
         Args:
-            immich_url: Internal URL for server-side API calls (e.g., http://immich_server:2283)
+            immich_url: Internal URL for server-side API calls (e.g., http://immich-server:2283)
             external_url: Browser-facing URL for login/logout redirects when accessed via non-localhost
                           (e.g., https://immich.houseoffeuer.com). Defaults to immich_url if not set.
             localhost_port: Immich port to use when request comes from localhost (default: 2283)

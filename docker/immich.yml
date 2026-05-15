@@ -134,13 +134,13 @@ services:
     #   Ollama will have OLLAMA_GPU_ID in .env → assigned in ollama.yml
     #   Each service's device_ids block is fully independent.
     # =========================================================================
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["${IMMICH_ML_GPU_ID:-0}"]
-              capabilities: [gpu]
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           device_ids: ["${IMMICH_ML_GPU_ID:-0}"]
+    #           capabilities: [gpu]
 
     environment:
       MACHINE_LEARNING_CACHE_FOLDER: /cache
